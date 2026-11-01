@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مكتبتي | نظام إدارة المكتبة والحجز</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --ink:#000000; --ink2:#0a0a0a; --ink3:#000000; --line:rgba(201,161,90,.6);
+  --parch:#000000; --parch2:#050505; --parch3:#0d0d0d; --lineL:rgba(201,161,90,.45);
+  --brass:#C9A15A; --brass-d:#A9843F; --brass-l:#E2C892;
+  --ink-soft:#d4b773; --text-d:#E2C892; --text-m:#d4b773; --text-mL:#burgundy;
+  --green:#3E7A5B; --red:#B4483A; --amber:#C9A15A;
+  --r:14px; --rs:9px;
+  --shadow: 0 10px 30px rgba(0,0,0,.65);
+  --shadowL: 0 8px 24px rgba(201,161,90,.12);
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{font-family:'IBM Plex Sans Arabic',sans-serif; background:#000; color:var(--text-d); direction:rtl;}
+h1,h2,h3,.serif{font-family:'Amiri',serif;}
+button{font-family:inherit; cursor:pointer; border:none;}
+input,select,textarea{font-family:inherit; direction:rtl;}
+a{color:inherit; text-decoration:none;}
+::selection{background:var(--brass-l);}
+.num{font-variant-numeric:tabular-nums; letter-spacing:.02em;}
+img{max-width:100%;}
+.scrollx{overflow-x:auto;}
+::-webkit-scrollbar{width:9px;height:9px;}
+::-webkit-scrollbar-thumb{background:var(--lineL);border-radius:8px;}
+
+/* ---------- shared bits ---------- */
+.container{max-width:1180px;margin:0 auto;padding:0 24px;}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14.5px;transition:.15s;}
+.btn-brass{background:linear-gradient(180deg,var(--brass-l),var(--brass));color:#241a05;box-shadow:0 6px 16px rgba(169,132,63,.35);}
+.btn-brass:hover{filter:brightness(1.06);transform:translateY(-1px);}
+.btn-ghost{background:transparent;border:1.5px solid var(--lineL);color:var(--text-d);}
+.btn-ghost:hover{border-color:var(--brass-d);}
+.btn-ghost-dark{background:transparent;border:1.5px solid var(--line);color:#EDEBE4;}
+.btn-ghost-dark:hover{border-color:var(--brass);}
+.btn-dark{background:var(--ink3);color:#fff;}
+.btn-sm{padding:7px 14px;font-size:13px;border-radius:999px;}
+.btn-danger{background:rgba(180,72,58,.12);color:var(--red);}
+.btn[disabled]{opacity:.4;cursor:not-allowed;}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;}
+.badge-amber{background:rgba(201,161,90,.16);color:#8a6a26;}
+.badge-green{background:rgba(62,122,91,.14);color:var(--green);}
+.badge-red{background:rgba(180,72,58,.13);color:var(--red);}
+.badge-gray{background:rgba(107,114,128,.14);color:#565c68;}
+.badge-blue{background:rgba(60,90,160,.13);color:#3c5aa0;}
+
+/* ============ CUSTOMER SITE (warm/parchment theme) ============ */
+.site{min-height:100vh;background:
+  radial-gradient(900px 420px at 85% -10%, rgba(201,161,90,.14), transparent),
+  var(--parch);}
+.topbar{position:sticky;top:0;z-index:40;background:rgba(247,243,234,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--lineL);}
+.topbar-inner{display:flex;align-items:center;justify-content:space-between;padding:16px 0;}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand-mark{width:38px;height:38px;border-radius:10px;background:var(--ink);display:flex;align-items:center;justify-content:center;color:var(--brass-l);font-family:'Amiri',serif;font-size:20px;}
+.brand-name{font-family:'Amiri',serif;font-weight:700;font-size:21px;}
+.brand-tag{font-size:11px;color:var(--text-m);margin-top:-2px;}
+.nav-links{display:flex;gap:6px;align-items:center;}
+.nav-link{padding:9px 14px;border-radius:999px;font-size:14px;font-weight:500;color:var(--text-m);}
+.nav-link.active,.nav-link:hover{background:var(--parch3);color:var(--text-d);}
+
+.hero{padding:64px 0 44px;}
+.hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:48px;align-items:center;}
+.eyebrow{font-size:12.5px;letter-spacing:.14em;color:var(--brass-d);font-weight:700;margin-bottom:14px;}
+.hero h1{font-size:44px;line-height:1.28;font-weight:700;margin-bottom:16px;}
+.hero p.lead{font-size:16.5px;color:var(--text-m);line-height:1.85;max-width:46ch;margin-bottom:28px;}
+.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;}
+
+.quiet-meter{background:var(--parch2);border:1px solid var(--lineL);border-radius:var(--r);padding:22px;box-shadow:var(--shadowL);}
+.qm-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+.qm-title{font-size:13px;color:var(--text-m);font-weight:600;}
+.qm-count{font-family:'Amiri',serif;font-size:30px;font-weight:700;}
+.qm-count small{font-size:14px;font-weight:400;color:var(--text-m);}
+.seat-dots{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-bottom:10px;}
+.seat-dot{aspect-ratio:1;border-radius:5px;background:var(--parch3);}
+.seat-dot.free{background:linear-gradient(160deg,#dff0e6,#c9e6d5);}
+.seat-dot.busy{background:linear-gradient(160deg,var(--brass-l),var(--brass));}
+.seat-dot.off{background:repeating-linear-gradient(45deg,#eee,#eee 3px,#e2e2e2 3px,#e2e2e2 6px);}
+.qm-legend{display:flex;gap:16px;font-size:12px;color:var(--text-m);}
+.qm-legend span{display:flex;align-items:center;gap:5px;}
+.dot{width:8px;height:8px;border-radius:2px;display:inline-block;}
+
+.section{padding:46px 0;}
+.section-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px;}
+.section-head h2{font-size:26px;}
+.section-head p{color:var(--text-m);font-size:14px;margin-top:4px;}
+
+.price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;}
+.price-card{background:var(--parch2);border:1px solid var(--lineL);border-radius:var(--r);padding:20px;text-align:center;transition:.15s;}
+.price-card:hover{border-color:var(--brass);transform:translateY(-2px);box-shadow:var(--shadowL);}
+.price-card .lbl{font-size:13.5px;color:var(--text-m);margin-bottom:8px;font-weight:600;}
+.price-card .val{font-family:'Amiri',serif;font-size:26px;font-weight:700;}
+.price-card .val small{font-size:13px;font-weight:400;color:var(--text-m);}
+
+.prod-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;}
+.prod-card{background:var(--parch2);border:1px solid var(--lineL);border-radius:var(--r);padding:16px;text-align:center;}
+.prod-emoji{font-size:34px;margin-bottom:8px;}
+.prod-name{font-weight:600;font-size:14.5px;}
+.prod-price{color:var(--brass-d);font-weight:700;margin-top:4px;}
+
+.card-plain{background:var(--parch2);border:1px solid var(--lineL);border-radius:var(--r);padding:26px;box-shadow:var(--shadowL);}
+.form-row{margin-bottom:16px;}
+.form-row label{display:block;font-size:13px;font-weight:600;color:var(--text-m);margin-bottom:6px;}
+.form-row input,.form-row select,.form-row textarea,
+.input-dark{width:100%;padding:11px 13px;border-radius:var(--rs);border:1.5px solid var(--brass);font-size:14.5px;background:#111;color:var(--brass-l);box-shadow:inset 0 0 0 1px rgba(201,161,90,.12);}
+.form-row input:focus,.form-row select:focus,.form-row textarea:focus,.input-dark:focus{outline:none;border-color:var(--brass);background:#111;color:var(--brass-l);box-shadow:0 0 0 2px rgba(201,161,90,.18);}
+.form-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.dur-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
+.dur-opt{border:1.5px solid var(--lineL);border-radius:var(--rs);padding:12px;text-align:center;cursor:pointer;}
+.dur-opt.sel{border-color:var(--brass);background:rgba(201,161,90,.08);}
+.dur-opt .l{font-size:13px;color:var(--text-m);font-weight:600;}
+.dur-opt .p{font-family:'Amiri',serif;font-weight:700;font-size:18px;margin-top:3px;}
+.price-total{display:flex;justify-content:space-between;align-items:center;background:var(--ink);color:#fff;border-radius:var(--rs);padding:18px 20px;margin:20px 0;}
+.price-total .t{font-size:13px;color:#c9cbd3;}
+.price-total .v{font-family:'Amiri',serif;font-size:26px;font-weight:700;color:var(--brass-l);}
+
+footer.site-footer{border-top:1px solid var(--lineL);padding:30px 0;margin-top:40px;color:var(--text-m);font-size:13px;text-align:center;}
+
+/* ============ ADMIN (dark ink theme) ============ */
+.admin{min-height:100vh;background:var(--ink);color:#EDEBE4;display:flex;}
+.sidebar{width:246px;flex-shrink:0;background:var(--ink2);border-left:1px solid var(--line);display:flex;flex-direction:column;height:100vh;position:sticky;top:0;}
+.sb-brand{padding:22px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);}
+.sb-brand .brand-mark{background:var(--brass);color:var(--ink);}
+.sb-nav{flex:1;overflow-y:auto;padding:14px 12px;}
+.sb-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;font-size:14px;color:#B7BAC4;margin-bottom:2px;font-weight:500;}
+.sb-item .ic{width:18px;text-align:center;}
+.sb-item:hover{background:var(--ink3);color:#fff;}
+.sb-item.active{background:linear-gradient(90deg,rgba(201,161,90,.16),transparent);color:var(--brass-l);border-right:2.5px solid var(--brass);}
+.sb-foot{padding:14px 18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-soft);}
+.sb-foot b{color:#EDEBE4;display:block;font-size:13.5px;}
+.admin-main{flex:1;min-width:0;}
+.admin-top{position:sticky;top:0;z-index:20;background:rgba(20,23,31,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:16px 28px;display:flex;justify-content:space-between;align-items:center;}
+.admin-top h1{font-size:19px;font-weight:700;font-family:'IBM Plex Sans Arabic';}
+.admin-top p{font-size:12.5px;color:var(--ink-soft);margin-top:2px;}
+.admin-body{padding:26px 28px 60px;}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px;}
+.kpi{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r);padding:18px;position:relative;overflow:hidden;}
+.kpi .l{font-size:12.5px;color:var(--ink-soft);font-weight:600;margin-bottom:8px;}
+.kpi .v{font-family:'Amiri',serif;font-size:27px;font-weight:700;}
+.kpi .v small{font-size:13px;color:var(--ink-soft);font-weight:400;}
+.kpi .bar{position:absolute;bottom:0;right:0;left:0;height:3px;background:linear-gradient(90deg,var(--brass),transparent);}
+
+.panel{background:var(--ink2);border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:18px;}
+.panel-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+.panel-h h3{font-size:16px;font-weight:700;}
+.panel-h .sub{font-size:12.5px;color:var(--ink-soft);}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+th{text-align:right;color:var(--ink-soft);font-weight:600;font-size:12px;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;}
+td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap;}
+tr:hover td{background:rgba(255,255,255,.02);}
+.site table th{color:var(--text-m);border-bottom:1px solid var(--lineL);}
+.site table td{border-bottom:1px solid var(--lineL);}
+
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+.input-dark{background:#111;border:1px solid var(--brass);color:var(--brass-l);border-radius:9px;padding:9px 13px;font-size:13.5px;}
+.input-dark::placeholder{color:rgba(226,200,146,.7);}
+select.input-dark option{background:#111;color:var(--brass-l);}
+
+/* keep overall design unchanged, just field backgrounds */
+#app .login-wrap,
+#app .login-card,
+#app .form-row input,
+#app .form-row select,
+#app .form-row textarea,
+#app .input-dark{background:#111 !important;color:var(--brass-l) !important;border-color:var(--brass) !important;}
+.chip-filter{display:flex;gap:6px;flex-wrap:wrap;}
+.chip{padding:7px 14px;border-radius:999px;font-size:12.5px;border:1px solid var(--line);color:var(--ink-soft);}
+.chip.on{background:var(--brass);color:var(--ink);border-color:var(--brass);font-weight:700;}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+@media(max-width:980px){.grid2,.grid3{grid-template-columns:1fr;} .hero-grid{grid-template-columns:1fr;} .form-grid2{grid-template-columns:1fr;}}
+
+.seat-grid-admin{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;}
+.seat-tile{border:1px solid var(--line);border-radius:10px;padding:12px 6px;text-align:center;background:var(--ink3);}
+.seat-tile .code{font-family:'Amiri',serif;font-weight:700;font-size:16px;}
+.seat-tile .st{font-size:10.5px;margin-top:4px;display:block;}
+.seat-tile.free{border-color:rgba(62,122,91,.4);}
+.seat-tile.busy{border-color:var(--brass);background:rgba(201,161,90,.09);}
+.seat-tile.off{opacity:.5;}
+
+.modal-bg{position:fixed;inset:0;background:rgba(10,10,14,.6);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px);}
+.modal{background:var(--ink2);border:1px solid var(--line);border-radius:16px;padding:26px;max-width:460px;width:100%;max-height:88vh;overflow-y:auto;color:#EDEBE4;}
+.modal.light{background:var(--parch2);color:var(--text-d);border-color:var(--lineL);}
+.modal h3{font-size:17px;margin-bottom:16px;}
+.modal-close{position:absolute;}
+.stack{display:flex;flex-direction:column;gap:10px;}
+
+.empty{text-align:center;padding:40px 20px;color:var(--ink-soft);}
+.site .empty{color:var(--text-m);}
+.empty .ic{font-size:30px;margin-bottom:8px;}
+
+.notif-item{display:flex;gap:12px;padding:13px 4px;border-bottom:1px solid var(--line);}
+.notif-item .ic{width:34px;height:34px;border-radius:9px;background:var(--ink3);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.notif-item .t{font-size:13.5px;} .notif-item .ts{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+.notif-item.unread{background:rgba(201,161,90,.05);}
+.bell-btn{position:relative;}
+.bell-dot{position:absolute;top:-2px;left:-2px;width:9px;height:9px;background:var(--red);border-radius:50%;border:2px solid var(--ink2);}
+
+.tab-row{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap;}
+.tab-btn{padding:10px 16px;font-size:13.5px;color:var(--ink-soft);font-weight:600;border-bottom:2px solid transparent;}
+.tab-btn.on{color:var(--brass-l);border-color:var(--brass);}
+
+.profile-hero{display:flex;gap:18px;align-items:center;background:linear-gradient(120deg,var(--ink3),var(--ink2));border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:18px;}
+.avatar{width:58px;height:58px;border-radius:50%;background:var(--brass);color:var(--ink);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-weight:700;font-size:22px;flex-shrink:0;}
+.mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px;}
+.mini-stat{background:var(--ink3);border-radius:10px;padding:12px;text-align:center;}
+.mini-stat .v{font-family:'Amiri',serif;font-weight:700;font-size:19px;color:var(--brass-l);}
+.mini-stat .l{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+
+.site .mini-stat{background:var(--parch3);}
+.site .mini-stat .v{color:var(--brass-d);}
+.site .profile-hero{background:linear-gradient(120deg,#fff,var(--parch3));border-color:var(--lineL);}
+
+.toast-wrap{position:fixed;bottom:22px;left:22px;z-index:200;display:flex;flex-direction:column;gap:8px;}
+.toast{background:var(--ink);color:#fff;border:1px solid var(--brass);padding:12px 18px;border-radius:10px;font-size:13.5px;box-shadow:var(--shadow);animation:up .2s ease;}
+@keyframes up{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+.pin-boxes{display:flex;gap:8px;justify-content:center;}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at top, rgba(201,161,90,.12), transparent 28%), #000;}
+.login-card{background:#000;border:1px solid var(--brass);border-radius:18px;padding:36px;width:100%;max-width:380px;color:var(--brass-l);box-shadow:0 18px 40px rgba(0,0,0,.7);}
+
+/* ============ MOBILE RESPONSIVE ADMIN ============ */
+.hamburger-btn{display:none;width:38px;height:38px;border-radius:9px;background:var(--ink3);color:#EDEBE4;font-size:18px;align-items:center;justify-content:center;flex-shrink:0;}
+.sidebar-overlay{display:none;}
+@media(max-width:900px){
+  .admin{display:block;}
+  .sidebar{
+    position:fixed; top:0; right:0; bottom:0; height:100vh; width:80vw; max-width:300px;
+    transform:translateX(100%); transition:transform .25s ease; z-index:90;
+    box-shadow:-10px 0 34px rgba(0,0,0,.45);
+  }
+  .sidebar.open{ transform:translateX(0); }
+  .admin-main{width:100%;}
+  .admin-top{padding:14px 16px;}
+  .admin-body{padding:16px 14px 50px;}
+  .hamburger-btn{display:inline-flex;}
+  .sidebar-overlay.show{display:block;position:fixed;inset:0;background:rgba(8,9,13,.55);z-index:80;}
+  .kpi-grid{grid-template-columns:repeat(2,1fr);}
+  .mini-stats{grid-template-columns:repeat(2,1fr);}
+  .panel{padding:16px;}
+  .admin-top h1{font-size:16.5px;}
+  .admin-top p{display:none;}
+  table{font-size:12.5px;}
+  th,td{padding:9px 8px;}
+  .toolbar{gap:8px;}
+  .modal{padding:20px;}
+}
+@media(max-width:480px){
+  .kpi-grid{grid-template-columns:1fr 1fr;}
+  .kpi .v{font-size:22px;}
+  .seat-grid-admin{grid-template-columns:repeat(3,1fr);}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toastWrap" class="toast-wrap"></div>
+
+<script>
+/* ============================================================
+   مكتبتي — Maktabati Library Management System
+   Single-file app using Supabase (Postgres) as the real persisted DB
+   ============================================================ */
+
+const SUPABASE_URL = 'https://mzfxkwntfsczbdvwhepl.supabase.co';
+const SUPABASE_KEY = 'sb_publishable__jV8Hqgs4qVZ3-3crpsKTw_HFH5J5m3';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const STORAGE_KEY = 'maktabati_db_v1'; // kept as a local emergency backup key only
+let DB = null;
+let UI = {
+  site: 'admin', // system is admin-only now — no public customer site
+  mobileNavOpen: false,
+  customerPage: 'home', // home | booking | account (kept for internal reuse only)
+  bookingDraft: { date:'', time:'', durationId:'', people:1, seatId:'' },
+  identStep: null, // when finishing a booking that needs identification
+  customerAuthPhone: null, // logged-in customer on site
+  adminAuthed: false,
+  adminStaff: null,
+  adminPage: 'dashboard',
+  analyticsPeriod: 'week',
+  customFrom:'', customTo:'',
+  custSearch:'', custFilter:'all',
+  bookSearch:'', bookFilter:'all',
+  reportTab:'visitors',
+  modal: null, // {type,...}
+};
+
+function uid(p){ return p+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function nowTimeHM(){ let d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-US')+' '+(DB&&DB.settings?DB.settings.currency:'ج.س'); }
+function fmtDate(iso){ if(!iso) return '—'; let d=new Date(iso); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function fmtDT(iso){ if(!iso) return '—'; let d=new Date(iso); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' · '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------------- default seed data ---------------- */
+function defaultDB(){
+  return {
+    settings:{
+      name:'مكتبتي', tagline:'مساحتك الهادئة للقراءة والتركيز والدراسة',
+      about:'"مكتبتي" مساحة قراءة ودراسة هادئة في قلب المدينة، صممت لتمنحك بيئة مريحة للتركيز، سواء أتيت لإنجاز مشروع أو لقراءة كتاب أو للدراسة قبل الاختبارات. مقاعد مريحة، إنترنت سريع، وهدوء تام.',
+      currency:'ج.س',
+      overtimeRate: 12,
+      durations:[
+        {id:'d_hour', label:'ساعة', hours:1, price:20},
+        {id:'d_2h', label:'ساعتان', hours:2, price:35},
+        {id:'d_3h', label:'3 ساعات', hours:3, price:50},
+        {id:'d_4h', label:'4 ساعات', hours:4, price:60},
+        {id:'d_day', label:'اليوم كامل', hours:10, price:80},
+        {id:'d_week', label:'الأسبوع', hours:70, price:300},
+        {id:'d_month', label:'الشهر', hours:300, price:900},
+      ],
+      packages:[
+        {id:'pk1', name:'باقة طالب', desc:'خصم خاص لطلاب الجامعات والمدارس، صالحة شهر كامل', price:650},
+        {id:'pk2', name:'باقة 10 زيارات', desc:'عشر زيارات مرنة الاستخدام خلال شهرين', price:170},
+      ],
+    },
+    seats: ['A01','A02','A03','A04','A05','A06','A07','A08','A09','A10','B01','B02','B03','B04'].map(c=>({id:uid('st'),code:c,note:'',status:'available'})), // available|maintenance
+    products:[
+      {id:uid('pr'),name:'مياه',emoji:'💧',price:2,stock:120,sold:0},
+      {id:uid('pr'),name:'قهوة',emoji:'☕',price:8,stock:80,sold:0},
+      {id:uid('pr'),name:'لاتيه',emoji:'🥛',price:12,stock:60,sold:0},
+      {id:uid('pr'),name:'شاي',emoji:'🍵',price:6,stock:70,sold:0},
+      {id:uid('pr'),name:'سناك',emoji:'🍪',price:5,stock:100,sold:0},
+      {id:uid('pr'),name:'عصير طبيعي',emoji:'🧃',price:10,stock:40,sold:0},
+    ],
+    expenses:[
+      {id:uid('ex'),title:'رواتب شهرية',category:'salary',amount:22000,date:todayISO(),notes:'رواتب موظفين شهر سبتمبر',createdAt:new Date().toISOString()},
+      {id:uid('ex'),title:'منتجات موردين',category:'supplier',amount:6800,date:todayISO(),notes:'شراء منتجات ومستلزمات مكتبة',createdAt:new Date().toISOString()},
+    ],
+    customers:{}, // phone -> {phone,name,email,firstVisit,visits,totalHours,totalSpent,lastVisit}
+    bookings:[], // {id,customerPhone,customerName,date,time,durationId,durationLabel,hours,price,people,seatId,status,createdAt}
+    checkins:[], // {id,bookingId,customerPhone,customerName,seatId,entryAt,exitAt,plannedHours,actualHours,finalPrice,status}
+    orders:[], // {id,items:[{productId,name,qty,price}],total,customerPhone,staff,createdAt}
+    staff:[
+      {id:uid('sf'),name:'عبدالله الحربي',username:'admin',pin:'1234',role:'Admin'},
+      {id:uid('sf'),name:'سارة القحطاني',username:'manager',pin:'1111',role:'Manager'},
+      {id:uid('sf'),name:'فهد العتيبي',username:'employee',pin:'0000',role:'Employee'},
+    ],
+    notifications:[], // {id,type,message,createdAt,read}
+  };
+}
+
+async function loadDB(){
+  try{
+    const { data, error } = await sb.from('app_state').select('data').eq('id',1).single();
+    if(error && error.code!=='PGRST116') throw error; // PGRST116 = no row found yet
+    if(data && data.data && Object.keys(data.data).length){ DB = data.data; ensureShape(); return; }
+  }catch(e){
+    console.error('Supabase load failed', e);
+    toast('تعذر الاتصال بقاعدة البيانات، تحقق من الإنترنت','err');
+  }
+  DB = defaultDB();
+  await persist();
+}
+function ensureShape(){
+  const d = defaultDB();
+  for(const k in d){ if(!(k in DB)) DB[k]=d[k]; }
+  if(!DB.settings.overtimeRate) DB.settings.overtimeRate = 12;
+  if(DB.settings.currency==='ر.س') DB.settings.currency='ج.س'; // migrate old currency to Sudanese Pound
+}
+let saving=false, saveQueued=false;
+async function persist(){
+  if(saving){ saveQueued=true; return; }
+  saving=true;
+  try{
+    const { error } = await sb.from('app_state').upsert({ id:1, data:DB, updated_at:new Date().toISOString() });
+    if(error) throw error;
+  }catch(e){
+    console.error('Supabase save failed', e);
+    toast('تعذر حفظ البيانات على قاعدة البيانات، حاول مرة أخرى','err');
+  }
+  saving=false;
+  if(saveQueued){ saveQueued=false; persist(); }
+}
+async function save(){ await persist(); render(); }
+
+function toast(msg,kind){
+  const el=document.createElement('div'); el.className='toast'; el.textContent=msg;
+  if(kind==='err') el.style.borderColor='#B4483A';
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(()=>el.remove(),3200);
+}
+function addNotif(type,message){
+  DB.notifications.unshift({id:uid('nt'),type,message,createdAt:new Date().toISOString(),read:false});
+  DB.notifications = DB.notifications.slice(0,300);
+}
+
+/* ---------------- derived helpers ---------------- */
+function seatStatusNow(seatId){
+  const seat = DB.seats.find(s=>s.id===seatId);
+  if(!seat) return 'available';
+  if(seat.status==='maintenance') return 'maintenance';
+  const active = DB.checkins.find(c=>c.seatId===seatId && c.status==='active');
+  return active ? 'occupied' : 'available';
+}
+function seatLabel(status){ return {available:'متاح',occupied:'مستخدم حالياً',maintenance:'غير متاح',reserved:'محجوز'}[status]||status; }
+function availableSeatsCount(){ return DB.seats.filter(s=>seatStatusNow(s.id)==='available').length; }
+function currentlyInside(){ return DB.checkins.filter(c=>c.status==='active'); }
+function getCustomer(phone){ return DB.customers[phone]; }
+function upsertCustomer(phone,name,email){
+  if(!DB.customers[phone]){
+    DB.customers[phone]={phone,name,email:email||'',firstVisit:new Date().toISOString(),visits:0,totalHours:0,totalSpent:0,lastVisit:null};
+  } else if(name){ DB.customers[phone].name=name; if(email) DB.customers[phone].email=email; }
+  return DB.customers[phone];
+}
+function durationById(id){ return DB.settings.durations.find(d=>d.id===id); }
+function isSameDay(iso,dateStr){ return iso && iso.slice(0,10)===dateStr; }
+function inLastDays(iso,days){ return (Date.now()-new Date(iso).getTime()) <= days*86400000; }
+function startOfWeek(d){ const x=new Date(d); const day=(x.getDay()+1)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
+
+function periodRange(period){
+  const now=new Date(); let from,to=now;
+  if(period==='today'){ from=new Date(now); from.setHours(0,0,0,0); }
+  else if(period==='week'){ from=startOfWeek(now); }
+  else if(period==='month'){ from=new Date(now.getFullYear(),now.getMonth(),1); }
+  else if(period==='3m'){ from=new Date(now); from.setMonth(from.getMonth()-3); }
+  else if(period==='6m'){ from=new Date(now); from.setMonth(from.getMonth()-6); }
+  else if(period==='year'){ from=new Date(now.getFullYear(),0,1); }
+  else if(period==='custom'){ from = UI.customFrom? new Date(UI.customFrom):new Date(0); to = UI.customTo? new Date(UI.customTo+'T23:59:59'):now; }
+  else { from=new Date(0); }
+  return {from,to};
+}
+function inRange(iso,range){ const t=new Date(iso).getTime(); return t>=range.from.getTime() && t<=range.to.getTime(); }
+
+/* ============================================================ ROUTER / RENDER ============================================================ */
+function clearModalDom(){
+  document.querySelectorAll('body > .modal-bg, body > .login-wrap').forEach(el=>el.remove());
+}
+function render(){
+  clearModalDom();
+  const app=document.getElementById('app');
+  app.innerHTML = UI.site==='admin' ? renderAdmin() : renderSite();
+  bindGlobalEvents();
+  if(UI.modal && UI.modal.type!=='staffLogin') renderModal();
+  if(UI.site==='admin' && UI.adminAuthed && UI.adminPage==='dashboard') setTimeout(drawDashboardCharts,30);
+  if(UI.site==='admin' && UI.adminAuthed && UI.adminPage==='analytics') setTimeout(drawAnalyticsChart,30);
+}
+
+/* ============================================================ CUSTOMER SITE ============================================================ */
+function renderSite(){
+  return `<div class="site">
+    ${siteTopbar()}
+    ${UI.customerPage==='home'?siteHome(): UI.customerPage==='booking'?siteBooking(): siteAccount()}
+    <footer class="site-footer">© ${new Date().getFullYear()} ${esc(DB.settings.name)} — جميع الحقوق محفوظة &nbsp;·&nbsp; <a onclick="App.goAdmin()" style="color:var(--brass-d);cursor:pointer;">دخول الموظفين</a></footer>
+  </div>`;
+}
+function siteTopbar(){
+  const loggedName = UI.customerAuthPhone ? (getCustomer(UI.customerAuthPhone)?.name||'') : null;
+  return `<div class="topbar"><div class="container topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">م</div>
+      <div><div class="brand-name">${esc(DB.settings.name)}</div><div class="brand-tag">مساحة قراءة ودراسة</div></div>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link ${UI.customerPage==='home'?'active':''}" onclick="App.goSite('home')">الرئيسية</a>
+      <a class="nav-link ${UI.customerPage==='booking'?'active':''}" onclick="App.goSite('booking')">الحجز</a>
+      <a class="nav-link ${UI.customerPage==='account'?'active':''}" onclick="App.goSite('account')">${loggedName?('حسابي · '+esc(loggedName.split(' ')[0])):'حسابي'}</a>
+      ${loggedName?`<button class="btn btn-ghost btn-sm" onclick="App.customerLogout()">تسجيل خروج</button>`:`<button class="btn btn-ghost btn-sm" onclick="App.openLoginModal()">تسجيل دخول</button>`}
+    </div>
+  </div></div>`;
+}
+function siteHome(){
+  const total=DB.seats.length, free=availableSeatsCount();
+  const dots = DB.seats.map(s=>{ const st=seatStatusNow(s.id); return `<div class="seat-dot ${st==='available'?'free':st==='maintenance'?'off':'busy'}" title="${esc(s.code)} — ${seatLabel(st)}"></div>`; }).join('');
+  return `
+  <section class="hero"><div class="container hero-grid">
+    <div>
+      <div class="eyebrow">مكتبة وقراءة · الرياض</div>
+      <h1 class="serif">حيث يجد تركيزك مكانه</h1>
+      <p class="lead">${esc(DB.settings.about)}</p>
+      <div class="hero-ctas">
+        <button class="btn btn-brass" onclick="App.goSite('booking')">احجز الآن</button>
+        <button class="btn btn-ghost" onclick="App.openLoginModal()">تسجيل دخول</button>
+      </div>
+    </div>
+    <div class="quiet-meter">
+      <div class="qm-top"><span class="qm-title">المقاعد المتاحة الآن</span><span class="qm-count num">${free}<small> / ${total}</small></span></div>
+      <div class="seat-dots">${dots}</div>
+      <div class="qm-legend">
+        <span><i class="dot" style="background:#bfe3cf"></i> متاح</span>
+        <span><i class="dot" style="background:var(--brass)"></i> مستخدم</span>
+        <span><i class="dot" style="background:#e2e2e2"></i> غير متاح</span>
+      </div>
+    </div>
+  </div></section>
+
+  <section class="section"><div class="container">
+    <div class="section-head"><div><h2 class="serif">الأسعار والباقات</h2><p>اختر المدة التي تناسبك — الأسعار تُحدَّث مباشرة من إدارة المكتبة</p></div></div>
+    <div class="price-grid">
+      ${DB.settings.durations.map(d=>`<div class="price-card"><div class="lbl">${esc(d.label)}</div><div class="val">${d.price}<small> ${DB.settings.currency}</small></div></div>`).join('')}
+    </div>
+  </div></section>
+
+  <section class="section" style="background:var(--parch2);border-top:1px solid var(--lineL);border-bottom:1px solid var(--lineL);"><div class="container">
+    <div class="section-head"><div><h2 class="serif">المنتجات المتوفرة</h2><p>مشروبات وسناكس متوفرة داخل المكتبة</p></div></div>
+    <div class="prod-grid">
+      ${DB.products.map(p=>`<div class="prod-card"><div class="prod-emoji">${p.emoji}</div><div class="prod-name">${esc(p.name)}</div><div class="prod-price">${fmtMoney(p.price)}</div></div>`).join('')}
+    </div>
+  </div></section>
+
+  <section class="section"><div class="container">
+    <div class="section-head"><div><h2 class="serif">باقات مخصصة</h2><p>خيارات مرنة لمن يزورنا بانتظام</p></div></div>
+    <div class="grid3">
+      ${DB.settings.packages.map(pk=>`<div class="card-plain"><h3 style="font-size:17px;margin-bottom:6px;">${esc(pk.name)}</h3><p style="color:var(--text-m);font-size:13.5px;line-height:1.7;margin-bottom:14px;">${esc(pk.desc)}</p><div style="font-family:'Amiri',serif;font-size:22px;font-weight:700;color:var(--brass-d);">${fmtMoney(pk.price)}</div></div>`).join('') || '<p style="color:var(--text-m);">لا توجد باقات مضافة بعد</p>'}
+    </div>
+  </div></section>`;
+}
+
+function siteBooking(){
+  const b=UI.bookingDraft;
+  const dur = durationById(b.durationId);
+  const price = dur? dur.price*(1) : 0;
+  const freeSeats = DB.seats.filter(s=>seatStatusNow(s.id)==='available');
+  return `<section class="section"><div class="container" style="max-width:760px;">
+    <div class="section-head"><div><h2 class="serif">احجز مقعدك</h2><p>اختر التاريخ والوقت والمدة المناسبة لك</p></div></div>
+    <div class="card-plain">
+      <div class="form-grid2">
+        <div class="form-row"><label>تاريخ الزيارة</label><input type="date" id="bk_date" value="${b.date}" min="${todayISO()}"></div>
+        <div class="form-row"><label>وقت الدخول</label><input type="time" id="bk_time" value="${b.time}"></div>
+      </div>
+      <div class="form-row"><label>عدد الأشخاص</label><input type="number" id="bk_people" min="1" max="12" value="${b.people}"></div>
+      <div class="form-row"><label>مدة الزيارة</label>
+        <div class="dur-pick">
+          ${DB.settings.durations.map(d=>`<div class="dur-opt ${b.durationId===d.id?'sel':''}" onclick="App.pickDuration('${d.id}')"><div class="l">${esc(d.label)}</div><div class="p">${d.price} ${DB.settings.currency}</div></div>`).join('')}
+        </div>
+      </div>
+      <div class="form-row"><label>المقعد (اختياري)</label>
+        <select id="bk_seat">
+          <option value="">بدون تحديد مقعد</option>
+          ${freeSeats.map(s=>`<option value="${s.id}" ${b.seatId===s.id?'selected':''}>${esc(s.code)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="price-total"><span class="t">السعر التقديري</span><span class="v num">${price} ${DB.settings.currency}</span></div>
+      <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.submitBooking()">تأكيد الحجز</button>
+    </div>
+  </div></section>`;
+}
+
+function siteAccount(){
+  if(!UI.customerAuthPhone){
+    return `<section class="section"><div class="container" style="max-width:420px;">
+      <div class="card-plain" style="text-align:center;">
+        <div class="serif" style="font-size:22px;margin-bottom:8px;">حسابي</div>
+        <p style="color:var(--text-m);font-size:14px;margin-bottom:18px;">سجّل الدخول برقم جوالك لعرض حجوزاتك وسجل زياراتك</p>
+        <button class="btn btn-brass" onclick="App.openLoginModal()">تسجيل الدخول</button>
+      </div>
+    </div></section>`;
+  }
+  const c = getCustomer(UI.customerAuthPhone);
+  const myBookings = DB.bookings.filter(b=>b.customerPhone===c.phone).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  const myOrders = DB.orders.filter(o=>o.customerPhone===c.phone);
+  return `<section class="section"><div class="container" style="max-width:820px;">
+    <div class="profile-hero">
+      <div class="avatar">${esc((c.name||'؟').trim()[0]||'؟')}</div>
+      <div style="flex:1;">
+        <div style="font-family:'Amiri',serif;font-size:21px;font-weight:700;">${esc(c.name)}</div>
+        <div style="color:var(--text-m);font-size:13.5px;">${esc(c.phone)} ${c.email?(' · '+esc(c.email)):''}</div>
+        <div class="mini-stats">
+          <div class="mini-stat"><div class="v num">${c.visits}</div><div class="l">عدد الزيارات</div></div>
+          <div class="mini-stat"><div class="v num">${Math.round(c.totalHours)}</div><div class="l">إجمالي الساعات</div></div>
+          <div class="mini-stat"><div class="v num">${fmtDate(c.lastVisit)}</div><div class="l">آخر زيارة</div></div>
+          <div class="mini-stat"><div class="v num">${fmtMoney(c.totalSpent)}</div><div class="l">إجمالي المدفوع</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-plain" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:12px;">حجوزاتي</h3>
+      <div class="scrollx"><table><thead><tr><th>التاريخ</th><th>الوقت</th><th>المدة</th><th>السعر</th><th>الحالة</th></tr></thead><tbody>
+      ${myBookings.length?myBookings.map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.durationLabel)}</td><td class="num">${fmtMoney(b.price)}</td><td>${statusBadge(b.status)}</td></tr>`).join(''):`<tr><td colspan="5" style="text-align:center;color:var(--text-m);">لا توجد حجوزات بعد</td></tr>`}
+      </tbody></table></div>
+    </div>
+    <div class="card-plain">
+      <h3 style="margin-bottom:12px;">مشترياتي</h3>
+      <div class="scrollx"><table><thead><tr><th>التاريخ</th><th>المنتجات</th><th>الإجمالي</th></tr></thead><tbody>
+      ${myOrders.length?myOrders.map(o=>`<tr><td>${fmtDT(o.createdAt)}</td><td>${o.items.map(i=>esc(i.name)+' ×'+i.qty).join('، ')}</td><td class="num">${fmtMoney(o.total)}</td></tr>`).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--text-m);">لا توجد مشتريات بعد</td></tr>`}
+      </tbody></table></div>
+    </div>
+  </div></section>`;
+}
+function statusBadge(status){
+  const map={Pending:['badge-amber','قيد الانتظار'],Confirmed:['badge-blue','مؤكد'],'Checked-in':['badge-green','في المكتبة'],Completed:['badge-gray','مكتمل'],Cancelled:['badge-red','ملغى']};
+  const m=map[status]||['badge-gray',status];
+  return `<span class="badge ${m[0]}">${m[1]}</span>`;
+}
+
+/* ============================================================ MODALS (login / identify) ============================================================ */
+function renderModal(){
+  const holder=document.createElement('div');
+  document.body.appendChild(holder);
+  const m=UI.modal;
+  let inner='';
+  if(m.type==='customerLogin'){
+    inner=`<div class="modal-bg" onclick="if(event.target===this)App.closeModal()"><div class="modal light">
+      <h3 class="serif">تسجيل الدخول</h3>
+      <div class="form-row"><label>رقم الجوال</label><input id="lg_phone" type="tel" placeholder="05xxxxxxxx" value="${esc(m.phone||'')}"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.customerLoginAttempt()">متابعة</button>
+        <button class="btn btn-ghost" onclick="App.closeModal()">إلغاء</button>
+      </div>
+    </div></div>`;
+  } else if(m.type==='identify'){
+    inner=`<div class="modal-bg"><div class="modal light">
+      <h3 class="serif">بيانات التواصل</h3>
+      <p style="font-size:13px;color:var(--text-m);margin-bottom:14px;">لم نجد حساباً بهذا الرقم — يرجى إدخال بياناتك لإتمام الحجز لأول مرة</p>
+      <div class="form-row"><label>رقم الجوال</label><input id="id_phone" type="tel" placeholder="05xxxxxxxx"></div>
+      <div class="form-row"><label>الاسم الكامل</label><input id="id_name" placeholder="مثال: محمد العتيبي"></div>
+      <div class="form-row"><label>البريد الإلكتروني (اختياري)</label><input id="id_email" type="email"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.finishIdentifyAndBook()">تأكيد الحجز</button>
+        <button class="btn btn-ghost" onclick="App.closeModal()">إلغاء</button>
+      </div>
+    </div></div>`;
+  } else if(m.type==='bookingConfirmed'){
+    inner=`<div class="modal-bg"><div class="modal light" style="text-align:center;">
+      <div style="font-size:40px;">✅</div>
+      <h3 class="serif" style="margin:12px 0 6px;">تم استلام حجزك</h3>
+      <p style="color:var(--text-m);font-size:13.5px;margin-bottom:16px;">رقم الحجز: <b>${esc(m.bookingId)}</b><br>سيتم تأكيد حجزك من قبل فريق المكتبة</p>
+      <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.closeModal();App.goSite('account');" >عرض حسابي</button>
+    </div></div>`;
+  } else if(m.type==='staffLogin'){
+    inner = staffLoginModalHTML(m);
+  } else if(m.type==='confirm'){
+    inner=`<div class="modal-bg"><div class="modal ${UI.site==='admin'?'':'light'}">
+      <h3>${esc(m.title)}</h3>
+      <p style="font-size:13.5px;color:${UI.site==='admin'?'var(--ink-soft)':'var(--text-m)'};margin-bottom:16px;">${esc(m.text)}</p>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-danger" style="flex:1;justify-content:center;" onclick="(${m.onConfirm})();App.closeModal();">${esc(m.confirmLabel||'تأكيد')}</button>
+        <button class="btn ${UI.site==='admin'?'btn-ghost-dark':'btn-ghost'}" onclick="App.closeModal()">إلغاء</button>
+      </div>
+    </div></div>`;
+  } else if(m.type==='seatForm'){
+    inner = seatFormModal(m);
+  } else if(m.type==='productForm'){
+    inner = productFormModal(m);
+  } else if(m.type==='expenseForm'){
+    inner = expenseFormModal();
+  } else if(m.type==='staffForm'){
+    inner = staffFormModal(m);
+  } else if(m.type==='durationForm'){
+    inner = durationFormModal(m);
+  } else if(m.type==='packageForm'){
+    inner = packageFormModal(m);
+  } else if(m.type==='pos'){
+    inner = posModal(m);
+  } else if(m.type==='walkin'){
+    inner = walkinModal(m);
+  } else if(m.type==='newBooking'){
+    inner = newBookingModal(m);
+  } else if(m.type==='checkoutConfirm'){
+    inner = checkoutModal(m);
+  } else if(m.type==='customerDetail'){
+    inner = customerDetailModal(m);
+  }
+  holder.outerHTML = inner;
+}
+function closeModalDom(){ /* modal rerendered fully each time via render() */ }
+
+/* ============================================================ APP ACTIONS (namespace) ============================================================ */
+const App = {};
+
+App.goSite = (page)=>{ UI.site='customer'; UI.customerPage=page; render(); window.scrollTo(0,0); };
+App.goAdmin = ()=>{ UI.site='admin'; render(); window.scrollTo(0,0); };
+App.openLoginModal = ()=>{ UI.modal={type:'customerLogin',phone:''}; render(); };
+App.closeModal = ()=>{ UI.modal=null; render(); };
+
+App.customerLoginAttempt = ()=>{
+  const phone = document.getElementById('lg_phone').value.trim();
+  if(!phone || phone.length<8){ toast('يرجى إدخال رقم جوال صحيح','err'); return; }
+  if(!DB.customers[phone]){ toast('لا يوجد حساب بهذا الرقم بعد، يمكنك إنشاء حساب عبر الحجز','err'); return; }
+  UI.customerAuthPhone = phone; UI.modal=null; UI.customerPage='account'; render();
+};
+App.customerLogout = ()=>{ UI.customerAuthPhone=null; render(); };
+
+App.pickDuration = (id)=>{ UI.bookingDraft.durationId=id; render(); };
+App.submitBooking = ()=>{
+  const date=document.getElementById('bk_date').value;
+  const time=document.getElementById('bk_time').value;
+  const people=parseInt(document.getElementById('bk_people').value||'1',10);
+  const seatId=document.getElementById('bk_seat').value;
+  if(!date||!time){ toast('يرجى اختيار التاريخ والوقت','err'); return; }
+  if(!UI.bookingDraft.durationId){ toast('يرجى اختيار مدة الزيارة','err'); return; }
+  UI.bookingDraft = {...UI.bookingDraft, date,time,people,seatId};
+  if(UI.customerAuthPhone && DB.customers[UI.customerAuthPhone]){
+    createBookingFor(UI.customerAuthPhone, DB.customers[UI.customerAuthPhone].name);
+  } else {
+    UI.modal={type:'identify'};
+    render();
+  }
+};
+App.finishIdentifyAndBook = ()=>{
+  const name=document.getElementById('id_name').value.trim();
+  const email=document.getElementById('id_email').value.trim();
+  const phone=document.getElementById('id_phone').value.trim();
+  if(!name||!phone){ toast('يرجى إدخال الاسم ورقم الجوال','err'); return; }
+  const cust = upsertCustomer(phone,name,email);
+  UI.customerAuthPhone = phone;
+  createBookingFor(phone,name);
+};
+
+function createBookingFor(phone,name){
+  const b=UI.bookingDraft; const dur=durationById(b.durationId);
+  const id=uid('bk');
+  DB.bookings.push({
+    id, customerPhone:phone, customerName:name, date:b.date, time:b.time,
+    durationId:dur.id, durationLabel:dur.label, hours:dur.hours, price:dur.price,
+    people:b.people||1, seatId:b.seatId||'', status:'Pending', createdAt:new Date().toISOString()
+  });
+  addNotif('booking','حجز جديد من '+name+' بتاريخ '+fmtDate(b.date));
+  UI.bookingDraft={date:'',time:'',durationId:'',people:1,seatId:''};
+  UI.modal={type:'bookingConfirmed', bookingId:id};
+  save();
+}
+
+/* ---------------- Staff / Admin login ---------------- */
+function staffLoginModalHTML(m){
+  return `<div class="login-wrap"><div class="login-card">
+    <div style="text-align:center;margin-bottom:20px;">
+      <div class="brand-mark" style="margin:0 auto 10px;">م</div>
+      <div class="serif" style="font-size:20px;font-weight:700;">لوحة تحكم ${esc(DB.settings.name)}</div>
+      <div style="color:var(--ink-soft);font-size:13px;">دخول الموظفين</div>
+    </div>
+    <div class="form-row" style="margin-bottom:12px;"><label style="color:#B7BAC4;">اسم المستخدم</label><input class="input-dark" style="width:100%;padding:11px;border-radius:9px;" id="st_user" value="${esc(m.user||'')}"></div>
+    <div class="form-row" style="margin-bottom:6px;"><label style="color:#B7BAC4;">الرمز السري (PIN)</label><input class="input-dark" style="width:100%;padding:11px;border-radius:9px;" id="st_pin" type="password" maxlength="6"></div>
+    ${m.error?`<div style="color:#e08a7c;font-size:12.5px;margin-bottom:8px;">${esc(m.error)}</div>`:''}
+    <button class="btn btn-brass" style="width:100%;justify-content:center;margin-top:12px;" onclick="App.staffLoginAttempt()">دخول</button>
+    <div style="margin-top:16px;font-size:11.5px;color:var(--ink-soft);text-align:center;">حسابات تجريبية: admin/1234 · manager/1111 · employee/0000</div>
+  </div></div>`;
+}
+App.staffLoginAttempt=()=>{
+  const user=document.getElementById('st_user').value.trim();
+  const pin=document.getElementById('st_pin').value.trim();
+  const s = DB.staff.find(x=>x.username===user && x.pin===pin);
+  if(!s){ UI.modal={type:'staffLogin',user,error:'بيانات الدخول غير صحيحة'}; render(); return; }
+  UI.adminAuthed=true; UI.adminStaff=s.id; UI.modal=null; UI.adminPage='dashboard'; render();
+};
+App.staffLogout=()=>{ UI.adminAuthed=false; UI.adminStaff=null; render(); };
+
+/* ============================================================ ADMIN SHELL ============================================================ */
+const NAV = [
+  {id:'dashboard', label:'الرئيسية', ic:'◆', roles:['Admin','Manager','Employee']},
+  {id:'bookings', label:'الحجوزات', ic:'▤', roles:['Admin','Manager','Employee']},
+  {id:'checkins', label:'تسجيل الدخول والخروج', ic:'⏱', roles:['Admin','Manager','Employee']},
+  {id:'customers', label:'العملاء', ic:'☺', roles:['Admin','Manager','Employee']},
+  {id:'seats', label:'المقاعد', ic:'▦', roles:['Admin','Manager']},
+  {id:'products', label:'المنتجات والمبيعات', ic:'✦', roles:['Admin','Manager','Employee']},
+  {id:'expenses', label:'المصروفات', ic:'💰', roles:['Admin','Manager']},
+  {id:'pricing', label:'الأسعار والباقات', ic:'﷼', roles:['Admin','Manager']},
+  {id:'analytics', label:'الإحصائيات', ic:'📈', roles:['Admin','Manager']},
+  {id:'reports', label:'التقارير', ic:'▧', roles:['Admin','Manager']},
+  {id:'staff', label:'الموظفون والصلاحيات', ic:'⚙', roles:['Admin']},
+  {id:'notifications', label:'الإشعارات', ic:'🔔', roles:['Admin','Manager','Employee']},
+];
+function currentStaff(){ return DB.staff.find(s=>s.id===UI.adminStaff); }
+
+function renderAdmin(){
+  if(!UI.adminAuthed){ UI.modal = UI.modal&&UI.modal.type==='staffLogin'?UI.modal:{type:'staffLogin'}; return staffLoginModalHTML(UI.modal); }
+  const staff = currentStaff();
+  const items = NAV.filter(n=>n.roles.includes(staff.role));
+  const unread = DB.notifications.filter(n=>!n.read).length;
+  const pageTitle = NAV.find(n=>n.id===UI.adminPage)?.label || '';
+  return `<div class="admin">
+    <div class="sidebar-overlay ${UI.mobileNavOpen?'show':''}" onclick="App.closeMobileNav()"></div>
+    <div class="sidebar ${UI.mobileNavOpen?'open':''}">
+      <div class="sb-brand"><div class="brand-mark">م</div><div><div style="font-weight:700;font-size:15px;">${esc(DB.settings.name)}</div><div style="font-size:11px;color:var(--ink-soft);">لوحة التحكم</div></div></div>
+      <div class="sb-nav">
+        ${items.map(n=>`<a class="sb-item ${UI.adminPage===n.id?'active':''}" onclick="App.goAdminPage('${n.id}')"><span class="ic">${n.ic}</span>${n.label}${n.id==='notifications'&&unread?`<span class="badge badge-amber" style="margin-right:auto;">${unread}</span>`:''}</a>`).join('')}
+      </div>
+      <div class="sb-foot"><b>${esc(staff.name)}</b>${staff.role==='Admin'?'مدير النظام':staff.role==='Manager'?'مسؤول العمليات':'موظف'}
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button class="btn btn-ghost-dark btn-sm" style="width:100%;justify-content:center;" onclick="App.staffLogout()">تسجيل خروج</button>
+        </div>
+      </div>
+    </div>
+    <div class="admin-main">
+      <div class="admin-top"><div style="display:flex;align-items:center;gap:10px;"><button class="hamburger-btn" onclick="App.toggleMobileNav()">☰</button><div><h1>${pageTitle}</h1><p>${fmtDT(new Date().toISOString())}</p></div></div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <span class="badge badge-green">${currentlyInside().length} داخل المكتبة الآن</span>
+        </div>
+      </div>
+      <div class="admin-body">${renderAdminPage(staff)}</div>
+    </div>
+
+  </div>`;
+}
+function currentRoute(){ return {adminPage:UI.adminPage}; }
+function applyRoute(route){ UI.adminPage = (route&&route.adminPage) || 'dashboard'; }
+function navigate(route){ applyRoute(route); UI.mobileNavOpen=false; window.history.pushState(currentRoute(),''); render(); window.scrollTo(0,0); }
+function restoreRoute(e){ applyRoute(e.state); render(); }
+window.addEventListener('popstate', restoreRoute);
+App.goAdminPage=(id)=>navigate({adminPage:id});
+App.toggleMobileNav=()=>{ UI.mobileNavOpen=!UI.mobileNavOpen; render(); };
+App.closeMobileNav=()=>{ UI.mobileNavOpen=false; render(); };
+
+function renderAdminPage(staff){
+  switch(UI.adminPage){
+    case 'dashboard': return pgDashboard();
+    case 'bookings': return pgBookings();
+    case 'checkins': return pgCheckins();
+    case 'customers': return pgCustomers();
+    case 'seats': return pgSeats();
+    case 'products': return pgProducts();
+    case 'expenses': return pgExpenses();
+    case 'pricing': return pgPricing();
+    case 'analytics': return pgAnalytics();
+    case 'reports': return pgReports();
+    case 'staff': return pgStaff();
+    case 'notifications': return pgNotifications();
+    default: return '';
+  }
+}
+
+/* ---------------- Dashboard ---------------- */
+function pgDashboard(){
+  const now=new Date();
+  const visitsToday = DB.checkins.filter(c=>isSameDay(c.entryAt,todayISO())).length;
+  const weekRange = periodRange('week'); const monthRange=periodRange('month');
+  const visitsWeek = DB.checkins.filter(c=>inRange(c.entryAt,weekRange)).length;
+  const visitsMonth = DB.checkins.filter(c=>inRange(c.entryAt,monthRange)).length;
+  const bookingsToday = DB.bookings.filter(b=>b.date===todayISO()).length;
+  const upcoming = DB.bookings.filter(b=>b.date>todayISO() && b.status!=='Cancelled').length;
+  const revToday = revenueInRange({from:new Date(new Date().setHours(0,0,0,0)),to:now});
+  const revWeek = revenueInRange(weekRange);
+  const revMonth = revenueInRange(monthRange);
+  const productSales = DB.orders.reduce((s,o)=>s+o.total,0);
+  const totalExpenses = (DB.expenses || []).reduce((s,e)=>s + Number(e.amount || 0), 0);
+  const netProfit = (revMonth + productSales) - totalExpenses;
+  const usageHours = DB.checkins.filter(c=>c.status==='completed').reduce((s,c)=>s+(c.actualHours||0),0);
+  const occRate = DB.seats.length? Math.round((currentlyInside().length/DB.seats.length)*100):0;
+
+  const topProducts = [...DB.products].sort((a,b)=>b.sold-a.sold).slice(0,5);
+
+  return `
+  <div class="kpi-grid">
+    ${kpi('زوار اليوم', visitsToday)}
+    ${kpi('زوار هذا الأسبوع', visitsWeek)}
+    ${kpi('زوار هذا الشهر', visitsMonth)}
+    ${kpi('الموجودون حالياً', currentlyInside().length)}
+    ${kpi('حجوزات اليوم', bookingsToday)}
+    ${kpi('حجوزات قادمة', upcoming)}
+    ${kpi('إيرادات اليوم', fmtMoney(revToday))}
+    ${kpi('إيرادات الأسبوع', fmtMoney(revWeek))}
+    ${kpi('إيرادات الشهر', fmtMoney(revMonth))}
+    ${kpi('مبيعات المنتجات', fmtMoney(productSales))}
+    ${kpi('المصروفات', fmtMoney(totalExpenses))}
+    ${kpi('صافي الربح', fmtMoney(netProfit))}
+    ${kpi('ساعات الاستخدام', Math.round(usageHours))}
+    ${kpi('نسبة إشغال المقاعد', occRate+'%')}
+  </div>
+  <div class="grid2">
+    <div class="panel"><div class="panel-h"><h3>الإيرادات آخر 7 أيام</h3></div><canvas id="chartRevenue" height="180"></canvas></div>
+    <div class="panel"><div class="panel-h"><h3>المنتجات الأكثر مبيعاً</h3></div>
+      ${topProducts.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);"><span>${p.emoji} ${esc(p.name)}</span><span class="badge badge-amber num">${p.sold} مباع</span></div>`).join('') || '<div class="empty">لا توجد مبيعات بعد</div>'}
+    </div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>أحدث الحجوزات</h3><div style="display:flex;gap:8px;"><button class="btn btn-brass btn-sm" onclick="App.openNewBooking()">+ حجز جديد</button><a class="btn btn-ghost-dark btn-sm" onclick="App.goAdminPage('bookings')">عرض الكل</a></div></div>
+    ${bookingTable(DB.bookings.slice(-6).reverse())}
+  </div>`;
+}
+function kpi(label,val){ return `<div class="kpi"><div class="l">${label}</div><div class="v num">${val}</div><div class="bar"></div></div>`; }
+function revenueInRange(range){
+  const bookingRev = DB.checkins.filter(c=>c.status==='completed' && inRange(c.exitAt,range)).reduce((s,c)=>s+(c.finalPrice||0),0);
+  const posRev = DB.orders.filter(o=>inRange(o.createdAt,range)).reduce((s,o)=>s+o.total,0);
+  return bookingRev+posRev;
+}
+function drawDashboardCharts(){
+  const el=document.getElementById('chartRevenue'); if(!el||!window.Chart) return;
+  const labels=[], data=[];
+  for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=d.toISOString().slice(0,10);
+    labels.push(d.toLocaleDateString('en-GB',{weekday:'short'}));
+    const dayRange={from:new Date(iso+'T00:00:00'),to:new Date(iso+'T23:59:59')};
+    data.push(revenueInRange(dayRange));
+  }
+  if(el._chart) el._chart.destroy();
+  el._chart = new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:'#C9A15A',borderRadius:6,maxBarThickness:34}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8A8F9C'}},y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#8A8F9C'}}}}});
+}
+
+/* ---------------- New booking (admin enters on behalf of a customer) ---------------- */
+function newBookingModal(m){
+  const freeSeats=DB.seats.filter(s=>seatStatusNow(s.id)==='available');
+  const known = m.phone ? DB.customers[m.phone] : null;
+  return `<div class="modal-bg"><div class="modal" style="max-width:520px;">
+    <h3>حجز جديد للعميل</h3>
+    <div class="form-grid2">
+      <div class="form-row"><label style="color:#B7BAC4;">رقم جوال العميل</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="nb_phone" value="${esc(m.phone||'')}" oninput="App.newBookingPhoneCheck(this.value)"></div>
+      <div class="form-row"><label style="color:#B7BAC4;">اسم العميل</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="nb_name" value="${known?esc(known.name):''}"></div>
+    </div>
+    <div id="nb_found" style="font-size:12px;color:#7fbf9c;margin-bottom:8px;">${known?('عميل حالي: '+esc(known.name)+' · '+known.visits+' زيارة سابقة'):''}</div>
+    <div class="form-grid2">
+      <div class="form-row"><label style="color:#B7BAC4;">تاريخ الزيارة</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" type="date" id="nb_date" value="${todayISO()}" min="${todayISO()}"></div>
+      <div class="form-row"><label style="color:#B7BAC4;">وقت الدخول</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" type="time" id="nb_time" value="${nowTimeHM()}"></div>
+    </div>
+    <div class="form-grid2">
+      <div class="form-row"><label style="color:#B7BAC4;">عدد الأشخاص</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" type="number" min="1" max="12" id="nb_people" value="1"></div>
+      <div class="form-row"><label style="color:#B7BAC4;">المقعد (اختياري)</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="nb_seat"><option value="">بدون تحديد</option>${freeSeats.map(s=>`<option value="${s.id}">${s.code}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row"><label style="color:#B7BAC4;">مدة الحجز</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="nb_dur">${DB.settings.durations.map(d=>`<option value="${d.id}">${d.label} — ${d.price} ${DB.settings.currency}</option>`).join('')}</select></div>
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.submitNewBooking()">إنشاء الحجز</button>
+      <button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button>
+    </div>
+  </div></div>`;
+}
+App.openNewBooking=()=>{ UI.modal={type:'newBooking'}; render(); };
+App.newBookingPhoneCheck=(v)=>{
+  const c=DB.customers[v.trim()]; const el=document.getElementById('nb_found');
+  if(el) el.textContent=c?('عميل حالي: '+c.name+' · '+c.visits+' زيارة سابقة'):'';
+  if(c) document.getElementById('nb_name').value=c.name;
+};
+App.submitNewBooking=()=>{
+  const phone=document.getElementById('nb_phone').value.trim();
+  const name=document.getElementById('nb_name').value.trim();
+  const date=document.getElementById('nb_date').value;
+  const time=document.getElementById('nb_time').value;
+  const people=parseInt(document.getElementById('nb_people').value||'1',10);
+  const seatId=document.getElementById('nb_seat').value;
+  const durId=document.getElementById('nb_dur').value;
+  if(!phone||!name||!date||!time){ toast('يرجى تعبئة جميع الحقول المطلوبة','err'); return; }
+  const dur=durationById(durId);
+  upsertCustomer(phone,name);
+  const id=uid('bk');
+  DB.bookings.push({id,customerPhone:phone,customerName:name,date,time,durationId:dur.id,durationLabel:dur.label,hours:dur.hours,price:dur.price,people:people||1,seatId,status:'Confirmed',createdAt:new Date().toISOString()});
+  addNotif('booking','حجز جديد لـ '+name+' بتاريخ '+fmtDate(date));
+  UI.modal=null; toast('تم إنشاء الحجز'); save();
+};
+
+/* ---------------- Bookings ---------------- */
+function bookingTable(list){
+  if(!list.length) return '<div class="empty"><div class="ic">▤</div>لا توجد حجوزات</div>';
+  return `<div class="scrollx"><table><thead><tr><th>العميل</th><th>الجوال</th><th>التاريخ</th><th>الوقت</th><th>المدة</th><th>المقعد</th><th>السعر</th><th>الحالة</th><th>إجراءات</th></tr></thead><tbody>
+  ${list.map(b=>{
+    const seat = DB.seats.find(s=>s.id===b.seatId);
+    return `<tr>
+      <td>${esc(b.customerName)}</td><td class="num">${esc(b.customerPhone)}</td><td>${fmtDate(b.date)}</td><td>${esc(b.time)}</td>
+      <td>${esc(b.durationLabel)}</td><td>${seat?esc(seat.code):'—'}</td><td class="num">${fmtMoney(b.price)}</td><td>${statusBadgeDark(b.status)}</td>
+      <td style="display:flex;gap:6px;">
+        ${b.status==='Pending'?`<button class="btn btn-ghost-dark btn-sm" onclick="App.confirmBooking('${b.id}')">تأكيد</button>`:''}
+        ${(b.status==='Confirmed')?`<button class="btn btn-brass btn-sm" onclick="App.checkinFromBooking('${b.id}')">تسجيل دخول</button>`:''}
+        ${(b.status!=='Cancelled'&&b.status!=='Completed')?`<button class="btn btn-danger btn-sm" onclick="App.cancelBooking('${b.id}')">إلغاء</button>`:''}
+      </td>
+    </tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
+function statusBadgeDark(status){ return statusBadge(status); }
+
+function pgBookings(){
+  let list=[...DB.bookings].reverse();
+  if(UI.bookFilter!=='all') list=list.filter(b=>b.status===UI.bookFilter);
+  if(UI.bookSearch) list=list.filter(b=>b.customerName.includes(UI.bookSearch)||b.customerPhone.includes(UI.bookSearch));
+  const filters=[['all','الكل'],['Pending','قيد الانتظار'],['Confirmed','مؤكد'],['Checked-in','في المكتبة'],['Completed','مكتمل'],['Cancelled','ملغى']];
+  return `<div class="panel">
+    <div class="toolbar">
+      <input class="input-dark" placeholder="بحث بالاسم أو الجوال…" value="${esc(UI.bookSearch)}" oninput="App.setBookSearch(this.value)">
+      <div class="chip-filter">${filters.map(f=>`<span class="chip ${UI.bookFilter===f[0]?'on':''}" onclick="App.setBookFilter('${f[0]}')">${f[1]}</span>`).join('')}</div>
+      <div style="display:flex;gap:8px;margin-right:auto;">
+        <button class="btn btn-dark btn-sm" onclick="App.openNewBooking()">+ حجز جديد لعميل</button>
+        <button class="btn btn-brass btn-sm" onclick="App.openWalkin()">+ دخول فوري (Walk-in)</button>
+      </div>
+    </div>
+    ${bookingTable(list)}
+  </div>`;
+}
+App.setBookSearch=(v)=>{UI.bookSearch=v; render();};
+App.setBookFilter=(v)=>{UI.bookFilter=v; render();};
+App.confirmBooking=(id)=>{ const b=DB.bookings.find(x=>x.id===id); if(b){ b.status='Confirmed'; addNotif('booking','تم تأكيد حجز '+b.customerName);} save(); };
+App.cancelBooking=(id)=>{
+  UI.modal={type:'confirm',title:'إلغاء الحجز',text:'هل تريد إلغاء هذا الحجز؟',confirmLabel:'إلغاء الحجز',onConfirm:`()=>{const b=DB.bookings.find(x=>x.id==='${id}');if(b)b.status='Cancelled';save();}`};
+  render();
+};
+App.checkinFromBooking=(id)=>{
+  const b=DB.bookings.find(x=>x.id===id); if(!b) return;
+  const id2=uid('ci');
+  DB.checkins.push({id:id2,bookingId:b.id,customerPhone:b.customerPhone,customerName:b.customerName,seatId:b.seatId||'',entryAt:new Date().toISOString(),exitAt:null,plannedHours:b.hours,plannedPrice:b.price,actualHours:0,finalPrice:0,status:'active'});
+  b.status='Checked-in';
+  addNotif('checkin','تسجيل دخول: '+b.customerName);
+  save();
+};
+
+/* ---------------- Check-in / Check-out ---------------- */
+function pgCheckins(){
+  const active = DB.checkins.filter(c=>c.status==='active');
+  const completedToday = DB.checkins.filter(c=>c.status==='completed' && isSameDay(c.exitAt,todayISO()));
+  return `
+  <div class="panel">
+    <div class="panel-h"><h3>الموجودون حالياً (${active.length})</h3><button class="btn btn-brass btn-sm" onclick="App.openWalkin()">+ تسجيل دخول فوري</button></div>
+    ${active.length? `<div class="scrollx"><table><thead><tr><th>العميل</th><th>الجوال</th><th>المقعد</th><th>وقت الدخول</th><th>المدة المحجوزة</th><th>الوقت المنقضي</th><th>إجراء</th></tr></thead><tbody>
+      ${active.map(c=>{
+        const seat=DB.seats.find(s=>s.id===c.seatId);
+        const elapsedH = ((Date.now()-new Date(c.entryAt).getTime())/3600000);
+        const over = elapsedH > c.plannedHours;
+        return `<tr><td>${esc(c.customerName)}</td><td class="num">${esc(c.customerPhone)}</td><td>${seat?esc(seat.code):'—'}</td><td>${fmtDT(c.entryAt)}</td><td>${c.plannedHours} س</td>
+          <td class="num">${elapsedH.toFixed(1)} س ${over?'<span class="badge badge-red">تجاوز</span>':''}</td>
+          <td><button class="btn btn-brass btn-sm" onclick="App.openCheckout('${c.id}')">تسجيل خروج</button></td></tr>`;
+      }).join('')}</tbody></table></div>` : '<div class="empty"><div class="ic">⏱</div>لا يوجد أحد داخل المكتبة الآن</div>'}
+  </div>
+  <div class="panel">
+    <div class="panel-h"><h3>مغادرات اليوم</h3></div>
+    ${completedToday.length? `<div class="scrollx"><table><thead><tr><th>العميل</th><th>وقت الدخول</th><th>وقت الخروج</th><th>المدة الفعلية</th><th>السعر النهائي</th></tr></thead><tbody>
+    ${completedToday.map(c=>`<tr><td>${esc(c.customerName)}</td><td>${fmtDT(c.entryAt)}</td><td>${fmtDT(c.exitAt)}</td><td class="num">${c.actualHours.toFixed(1)} س</td><td class="num">${fmtMoney(c.finalPrice)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">لا توجد مغادرات مسجلة اليوم بعد</div>'}
+  </div>`;
+}
+App.openCheckout=(ciId)=>{ UI.modal={type:'checkoutConfirm',ciId}; render(); };
+function checkoutModal(m){
+  const c=DB.checkins.find(x=>x.id===m.ciId); if(!c) return '';
+  const elapsedH = (Date.now()-new Date(c.entryAt).getTime())/3600000;
+  const overHours = Math.max(0, elapsedH - c.plannedHours);
+  const finalPrice = c.plannedPrice + Math.ceil(overHours)*DB.settings.overtimeRate;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>تسجيل خروج — ${esc(c.customerName)}</h3>
+    <div class="stack" style="font-size:13.5px;color:#C9CBD3;">
+      <div style="display:flex;justify-content:space-between;"><span>وقت الدخول</span><span>${fmtDT(c.entryAt)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>المدة الفعلية</span><span class="num">${elapsedH.toFixed(1)} ساعة</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>المدة المحجوزة</span><span class="num">${c.plannedHours} ساعة</span></div>
+      ${overHours>0?`<div style="display:flex;justify-content:space-between;color:#e0b57c;"><span>ساعات إضافية</span><span class="num">${Math.ceil(overHours)} × ${DB.settings.overtimeRate} ${DB.settings.currency}</span></div>`:''}
+    </div>
+    <div class="price-total"><span class="t">السعر النهائي</span><span class="v num">${finalPrice} ${DB.settings.currency}</span></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.doCheckout('${c.id}')">تأكيد الخروج والدفع</button>
+      <button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button>
+    </div>
+  </div></div>`;
+}
+App.doCheckout=(ciId)=>{
+  const c=DB.checkins.find(x=>x.id===ciId); if(!c) return;
+  const elapsedH=(Date.now()-new Date(c.entryAt).getTime())/3600000;
+  const overHours=Math.max(0,elapsedH-c.plannedHours);
+  const finalPrice=c.plannedPrice+Math.ceil(overHours)*DB.settings.overtimeRate;
+  c.exitAt=new Date().toISOString(); c.actualHours=elapsedH; c.finalPrice=finalPrice; c.status='completed';
+  if(c.bookingId){ const b=DB.bookings.find(x=>x.id===c.bookingId); if(b) b.status='Completed'; }
+  const cust=upsertCustomer(c.customerPhone,c.customerName);
+  cust.visits+=1; cust.totalHours+=elapsedH; cust.totalSpent+=finalPrice; cust.lastVisit=c.exitAt;
+  addNotif('checkout','تسجيل خروج: '+c.customerName+' — '+fmtMoney(finalPrice));
+  UI.modal=null; save();
+};
+
+function walkinModal(){
+  const freeSeats=DB.seats.filter(s=>seatStatusNow(s.id)==='available');
+  return `<div class="modal-bg"><div class="modal">
+    <h3>حجز يدوي / زيارة فورية</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">اسم العميل</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="wk_name"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">رقم الجوال</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="wk_phone" oninput="App.walkinPhoneCheck(this.value)"></div>
+    <div id="wk_found" style="font-size:12px;color:#7fbf9c;margin-bottom:8px;"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">المدة</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="wk_dur">${DB.settings.durations.map(d=>`<option value="${d.id}">${d.label} — ${d.price} ${DB.settings.currency}</option>`).join('')}</select></div>
+    <div class="form-row"><label style="color:#B7BAC4;">المقعد</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="wk_seat"><option value="">بدون تحديد</option>${freeSeats.map(s=>`<option value="${s.id}">${s.code}</option>`).join('')}</select></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;margin-top:8px;" onclick="App.submitWalkin()">تسجيل الدخول الآن</button>
+  </div></div>`;
+}
+App.openWalkin=()=>{ UI.modal={type:'walkin'}; render(); };
+App.walkinPhoneCheck=(v)=>{ const c=DB.customers[v.trim()]; const el=document.getElementById('wk_found'); if(el) el.textContent=c?('عميل حالي: '+c.name+' · '+c.visits+' زيارة سابقة'):''; if(c) document.getElementById('wk_name').value=c.name; };
+App.submitWalkin=()=>{
+  const name=document.getElementById('wk_name').value.trim();
+  const phone=document.getElementById('wk_phone').value.trim();
+  const durId=document.getElementById('wk_dur').value;
+  const seatId=document.getElementById('wk_seat').value;
+  if(!name||!phone){ toast('يرجى إدخال الاسم والجوال','err'); return; }
+  const dur=durationById(durId);
+  upsertCustomer(phone,name);
+  const bid=uid('bk');
+  DB.bookings.push({id:bid,customerPhone:phone,customerName:name,date:todayISO(),time:nowTimeHM(),durationId:dur.id,durationLabel:dur.label,hours:dur.hours,price:dur.price,people:1,seatId,status:'Checked-in',createdAt:new Date().toISOString()});
+  DB.checkins.push({id:uid('ci'),bookingId:bid,customerPhone:phone,customerName:name,seatId,entryAt:new Date().toISOString(),exitAt:null,plannedHours:dur.hours,plannedPrice:dur.price,actualHours:0,finalPrice:0,status:'active'});
+  addNotif('checkin','وصول عميل: '+name);
+  UI.modal=null; save();
+};
+
+/* ---------------- Customers ---------------- */
+function pgCustomers(){
+  let list=Object.values(DB.customers);
+  if(UI.custSearch) list=list.filter(c=>c.name.includes(UI.custSearch)||c.phone.includes(UI.custSearch));
+  if(UI.custFilter==='new') list=list.filter(c=>inLastDays(c.firstVisit,30) && c.visits<=1);
+  if(UI.custFilter==='repeat') list=list.filter(c=>c.visits>1);
+  if(UI.custFilter==='mostVisits') list=[...list].sort((a,b)=>b.visits-a.visits).slice(0,15);
+  if(UI.custFilter==='mostSpend') list=[...list].sort((a,b)=>b.totalSpent-a.totalSpent).slice(0,15);
+  if(UI.custFilter==='inactive') list=list.filter(c=>c.lastVisit && !inLastDays(c.lastVisit,30));
+  if(UI.custFilter==='all') list=[...list].sort((a,b)=>new Date(b.firstVisit)-new Date(a.firstVisit));
+  const filters=[['all','الكل'],['new','عميل جديد'],['repeat','عميل متكرر'],['mostVisits','الأكثر زيارة'],['mostSpend','الأكثر إنفاقاً'],['inactive','لم يزر منذ فترة']];
+  return `<div class="panel">
+    <div class="toolbar">
+      <input class="input-dark" placeholder="بحث بالاسم أو رقم الجوال…" value="${esc(UI.custSearch)}" oninput="App.setCustSearch(this.value)">
+      <div class="chip-filter">${filters.map(f=>`<span class="chip ${UI.custFilter===f[0]?'on':''}" onclick="App.setCustFilter('${f[0]}')">${f[1]}</span>`).join('')}</div>
+    </div>
+    ${list.length?`<div class="scrollx"><table><thead><tr><th>الاسم</th><th>الجوال</th><th>عدد الزيارات</th><th>إجمالي الساعات</th><th>آخر زيارة</th><th>إجمالي الإنفاق</th><th></th></tr></thead><tbody>
+      ${list.map(c=>`<tr><td>${esc(c.name)}</td><td class="num">${esc(c.phone)}</td><td class="num">${c.visits}</td><td class="num">${Math.round(c.totalHours)}</td><td>${fmtDate(c.lastVisit)}</td><td class="num">${fmtMoney(c.totalSpent)}</td><td><button class="btn btn-ghost-dark btn-sm" onclick="App.openCustomer('${c.phone}')">التفاصيل</button></td></tr>`).join('')}
+    </tbody></table></div>`:'<div class="empty"><div class="ic">☺</div>لا يوجد عملاء مطابقون</div>'}
+  </div>`;
+}
+App.setCustSearch=(v)=>{UI.custSearch=v; render();};
+App.setCustFilter=(v)=>{UI.custFilter=v; render();};
+App.openCustomer=(phone)=>{ UI.modal={type:'customerDetail',phone}; render(); };
+function customerDetailModal(m){
+  const c=DB.customers[m.phone]; if(!c) return '';
+  const bookings=DB.bookings.filter(b=>b.customerPhone===c.phone).reverse();
+  const orders=DB.orders.filter(o=>o.customerPhone===c.phone).reverse();
+  return `<div class="modal-bg"><div class="modal" style="max-width:560px;">
+    <div class="profile-hero" style="padding:16px;">
+      <div class="avatar">${esc((c.name||'؟')[0])}</div>
+      <div><div style="font-weight:700;font-size:17px;">${esc(c.name)}</div><div style="color:var(--ink-soft);font-size:12.5px;">${esc(c.phone)} ${c.email?(' · '+esc(c.email)):''}</div></div>
+    </div>
+    <div class="mini-stats" style="margin-bottom:16px;">
+      <div class="mini-stat"><div class="v">${c.visits}</div><div class="l">زيارات</div></div>
+      <div class="mini-stat"><div class="v">${Math.round(c.totalHours)}</div><div class="l">ساعات</div></div>
+      <div class="mini-stat"><div class="v" style="font-size:13px;">${fmtDate(c.lastVisit)}</div><div class="l">آخر زيارة</div></div>
+      <div class="mini-stat"><div class="v" style="font-size:15px;">${fmtMoney(c.totalSpent)}</div><div class="l">إجمالي مدفوع</div></div>
+    </div>
+    <h3 style="font-size:14px;margin-bottom:8px;">آخر الحجوزات</h3>
+    <div class="scrollx" style="margin-bottom:14px;"><table><tbody>
+      ${bookings.slice(0,5).map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${esc(b.durationLabel)}</td><td>${statusBadge(b.status)}</td></tr>`).join('')||'<tr><td class="empty">لا توجد حجوزات</td></tr>'}
+    </tbody></table></div>
+    <h3 style="font-size:14px;margin-bottom:8px;">المشتريات</h3>
+    <div class="scrollx"><table><tbody>
+      ${orders.slice(0,5).map(o=>`<tr><td>${fmtDT(o.createdAt)}</td><td>${o.items.map(i=>i.name+'×'+i.qty).join('، ')}</td><td class="num">${fmtMoney(o.total)}</td></tr>`).join('')||'<tr><td class="empty">لا توجد مشتريات</td></tr>'}
+    </tbody></table></div>
+    <button class="btn btn-ghost-dark" style="width:100%;justify-content:center;margin-top:14px;" onclick="App.closeModal()">إغلاق</button>
+  </div></div>`;
+}
+
+/* ---------------- Seats ---------------- */
+function pgSeats(){
+  return `<div class="panel">
+    <div class="panel-h"><h3>المقاعد (${DB.seats.length})</h3><button class="btn btn-brass btn-sm" onclick="App.openSeatForm()">+ إضافة مقعد</button></div>
+    <div class="seat-grid-admin">
+      ${DB.seats.map(s=>{ const st=seatStatusNow(s.id);
+        return `<div class="seat-tile ${st==='available'?'free':st==='maintenance'?'off':'busy'}">
+          <div class="code">${esc(s.code)}</div><span class="st badge ${st==='available'?'badge-green':st==='maintenance'?'badge-gray':'badge-amber'}">${seatLabel(st)}</span>
+          <div style="display:flex;gap:4px;justify-content:center;margin-top:8px;">
+            <button class="btn btn-ghost-dark btn-sm" style="padding:4px 8px;" onclick="App.openSeatForm('${s.id}')">تعديل</button>
+            <button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="App.deleteSeat('${s.id}')">حذف</button>
+          </div>
+        </div>`; }).join('')}
+    </div>
+  </div>`;
+}
+App.openSeatForm=(id)=>{ const s=id?DB.seats.find(x=>x.id===id):null; UI.modal={type:'seatForm',seat:s}; render(); };
+function seatFormModal(m){
+  const s=m.seat;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>${s?'تعديل مقعد':'إضافة مقعد'}</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">رمز المقعد</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="st_code" value="${s?esc(s.code):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الحالة</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="st_status">
+      <option value="available" ${s&&s.status==='available'?'selected':''}>متاح</option>
+      <option value="maintenance" ${s&&s.status==='maintenance'?'selected':''}>غير متاح (صيانة)</option>
+    </select></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.saveSeat('${s?s.id:''}')">حفظ</button>
+  </div></div>`;
+}
+App.saveSeat=(id)=>{
+  const code=document.getElementById('st_code').value.trim();
+  const status=document.getElementById('st_status').value;
+  if(!code){ toast('أدخل رمز المقعد','err'); return; }
+  if(id){ const s=DB.seats.find(x=>x.id===id); s.code=code; s.status=status; }
+  else{ DB.seats.push({id:uid('st'),code,status,note:''}); }
+  UI.modal=null; save();
+};
+App.deleteSeat=(id)=>{
+  UI.modal={type:'confirm',title:'حذف المقعد',text:'هل تريد حذف هذا المقعد؟',confirmLabel:'حذف',onConfirm:`()=>{DB.seats=DB.seats.filter(x=>x.id!=='${id}');save();}`};
+  render();
+};
+
+/* ---------------- Products / POS ---------------- */
+function pgProducts(){
+  const lowStock = DB.products.filter(p=>p.stock<10);
+  return `
+  ${lowStock.length?`<div class="panel" style="border-color:rgba(180,72,58,.4);"><b style="color:#e08a7c;">⚠ تنبيه مخزون منخفض:</b> ${lowStock.map(p=>esc(p.name)).join('، ')}</div>`:''}
+  <div class="panel">
+    <div class="panel-h"><h3>المنتجات</h3><div style="display:flex;gap:8px;"><button class="btn btn-dark btn-sm" onclick="App.openPOS()">🧾 بيع الآن (POS)</button><button class="btn btn-brass btn-sm" onclick="App.openProductForm()">+ إضافة منتج</button></div></div>
+    <div class="scrollx"><table><thead><tr><th></th><th>المنتج</th><th>السعر</th><th>الكمية بالمخزون</th><th>عدد المباع</th><th>إجراءات</th></tr></thead><tbody>
+    ${DB.products.map(p=>`<tr><td style="font-size:20px;">${p.emoji}</td><td>${esc(p.name)}</td><td class="num">${fmtMoney(p.price)}</td><td class="num">${p.stock}</td><td class="num">${p.sold}</td>
+      <td style="display:flex;gap:6px;"><button class="btn btn-ghost-dark btn-sm" onclick="App.openProductForm('${p.id}')">تعديل</button><button class="btn btn-danger btn-sm" onclick="App.deleteProduct('${p.id}')">حذف</button></td></tr>`).join('')}
+    </tbody></table></div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>آخر المبيعات</h3></div>
+    ${DB.orders.length?`<div class="scrollx"><table><thead><tr><th>الوقت</th><th>العميل</th><th>المنتجات</th><th>الإجمالي</th></tr></thead><tbody>
+    ${[...DB.orders].reverse().slice(0,8).map(o=>`<tr><td>${fmtDT(o.createdAt)}</td><td>${o.customerPhone?esc(DB.customers[o.customerPhone]?.name||o.customerPhone):'زبون عابر'}</td><td>${o.items.map(i=>esc(i.name)+' ×'+i.qty).join('، ')}</td><td class="num">${fmtMoney(o.total)}</td></tr>`).join('')}
+    </tbody></table></div>`:'<div class="empty">لا توجد مبيعات بعد</div>'}
+  </div>`;
+}
+App.openProductForm=(id)=>{ const p=id?DB.products.find(x=>x.id===id):null; UI.modal={type:'productForm',product:p}; render(); };
+function productFormModal(m){
+  const p=m.product;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>${p?'تعديل منتج':'إضافة منتج'}</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">اسم المنتج</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="pr_name" value="${p?esc(p.name):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">رمز/إيموجي</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="pr_emoji" value="${p?p.emoji:'🧃'}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">السعر (${DB.settings.currency})</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="pr_price" value="${p?p.price:''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الكمية بالمخزون</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="pr_stock" value="${p?p.stock:''}"></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.saveProduct('${p?p.id:''}')">حفظ</button>
+  </div></div>`;
+}
+App.saveProduct=(id)=>{
+  const name=document.getElementById('pr_name').value.trim();
+  const emoji=document.getElementById('pr_emoji').value.trim()||'🧃';
+  const price=parseFloat(document.getElementById('pr_price').value||'0');
+  const stock=parseInt(document.getElementById('pr_stock').value||'0',10);
+  if(!name||!price){ toast('أدخل الاسم والسعر','err'); return; }
+  if(id){ const p=DB.products.find(x=>x.id===id); Object.assign(p,{name,emoji,price,stock}); }
+  else{ DB.products.push({id:uid('pr'),name,emoji,price,stock,sold:0}); }
+  UI.modal=null; save();
+};
+App.deleteProduct=(id)=>{
+  UI.modal={type:'confirm',title:'حذف المنتج',text:'هل تريد حذف هذا المنتج؟',confirmLabel:'حذف',onConfirm:`()=>{DB.products=DB.products.filter(x=>x.id!=='${id}');save();}`};
+  render();
+};
+let posCart=[];
+App.openPOS=()=>{ posCart=[]; UI.modal={type:'pos'}; render(); };
+function posModal(){
+  const total=posCart.reduce((s,i)=>s+i.price*i.qty,0);
+  return `<div class="modal-bg"><div class="modal" style="max-width:520px;">
+    <h3>نقطة بيع سريعة</h3>
+    <div class="prod-grid" style="margin-bottom:16px;">
+      ${DB.products.map(p=>`<div class="prod-card" style="cursor:pointer;background:var(--ink3);border-color:var(--line);" onclick="App.addToCart('${p.id}')"><div class="prod-emoji">${p.emoji}</div><div class="prod-name">${esc(p.name)}</div><div class="prod-price">${fmtMoney(p.price)}</div></div>`).join('')}
+    </div>
+    ${posCart.length?`<div class="stack" style="margin-bottom:10px;">${posCart.map((i,idx)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;"><span>${i.emoji} ${esc(i.name)} ×${i.qty}</span><span class="num">${fmtMoney(i.price*i.qty)} <button class="btn btn-danger btn-sm" style="padding:2px 8px;margin-right:6px;" onclick="App.removeFromCart(${idx})">×</button></span></div>`).join('')}</div>`:'<div class="empty">السلة فارغة — اضغط على منتج لإضافته</div>'}
+    <div class="form-row"><label style="color:#B7BAC4;">جوال العميل (اختياري لربط الطلب بحسابه)</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="pos_phone"></div>
+    <div class="price-total"><span class="t">الإجمالي</span><span class="v num">${total} ${DB.settings.currency}</span></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.completeSale()" ${posCart.length?'':'disabled'}>إتمام البيع</button>
+      <button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button>
+    </div>
+  </div></div>`;
+}
+App.addToCart=(pid)=>{
+  const p=DB.products.find(x=>x.id===pid); if(!p||p.stock<=0){toast('الكمية غير متوفرة','err');return;}
+  const existing=posCart.find(i=>i.productId===pid);
+  if(existing) existing.qty++; else posCart.push({productId:pid,name:p.name,emoji:p.emoji,price:p.price,qty:1});
+  render();
+};
+App.removeFromCart=(idx)=>{ posCart.splice(idx,1); render(); };
+App.completeSale=()=>{
+  if(!posCart.length) return;
+  const phone=document.getElementById('pos_phone')?.value.trim();
+  const total=posCart.reduce((s,i)=>s+i.price*i.qty,0);
+  DB.orders.push({id:uid('or'),items:posCart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price})),total,customerPhone:phone||'',staff:currentStaff()?.name||'',createdAt:new Date().toISOString()});
+  posCart.forEach(i=>{ const p=DB.products.find(x=>x.id===i.productId); if(p){ p.stock-=i.qty; p.sold+=i.qty; if(p.stock<5) addNotif('stock','مخزون منخفض: '+p.name+' ('+p.stock+' متبقي)'); } });
+  if(phone && DB.customers[phone]) DB.customers[phone].totalSpent += total;
+  posCart=[]; UI.modal=null; toast('تم تسجيل عملية البيع'); save();
+};
+
+/* ---------------- Expenses ---------------- */
+function pgExpenses(){
+  const total = DB.expenses.reduce((sum,e)=>sum + Number(e.amount || 0), 0);
+  const salaries = DB.expenses.filter(e=>e.category==='salary').reduce((sum,e)=>sum + Number(e.amount || 0),0);
+  const suppliers = DB.expenses.filter(e=>e.category==='supplier').reduce((sum,e)=>sum + Number(e.amount || 0),0);
+  return `
+  <div class="kpi-grid">
+    ${kpi('إجمالي المصروفات', fmtMoney(total))}
+    ${kpi('رواتب شهرية', fmtMoney(salaries))}
+    ${kpi('منتجات موردين', fmtMoney(suppliers))}
+    ${kpi('عدد المصروفات', DB.expenses.length)}
+  </div>
+  <div class="panel">
+    <div class="panel-h"><h3>سجل المصروفات</h3><button class="btn btn-brass btn-sm" onclick="App.openExpenseForm()">+ إضافة مصروف</button></div>
+    <div class="scrollx"><table><thead><tr><th>العنوان</th><th>الفئة</th><th>المبلغ</th><th>التاريخ</th><th>ملاحظات</th><th>إجراءات</th></tr></thead><tbody>
+      ${DB.expenses.length ? DB.expenses.slice().reverse().map(e=>`<tr>
+        <td>${esc(e.title)}</td>
+        <td>${e.category==='salary'?'رواتب شهرية':e.category==='supplier'?'منتجات موردين':e.category==='utility'?'مرافق':'أخرى'}</td>
+        <td class="num">${fmtMoney(e.amount)}</td>
+        <td>${fmtDate(e.date)}</td>
+        <td>${esc(e.notes||'—')}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="App.deleteExpense('${e.id}')">حذف</button></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="empty">لا توجد مصروفات بعد</td></tr>'}
+    </tbody></table></div>
+  </div>`;
+}
+App.openExpenseForm=()=>{ UI.modal={type:'expenseForm'}; render(); };
+function expenseFormModal(){
+  return `<div class="modal-bg"><div class="modal">
+    <h3>إضافة مصروف</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">العنوان</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="exp_title"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الفئة</label>
+      <select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="exp_category">
+        <option value="salary">رواتب شهرية</option>
+        <option value="supplier">منتجات موردين</option>
+        <option value="utility">مرافق</option>
+        <option value="other">أخرى</option>
+      </select>
+    </div>
+    <div class="form-row"><label style="color:#B7BAC4;">المبلغ</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="exp_amount"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">التاريخ</label><input class="input-dark" type="date" style="width:100%;padding:10px;border-radius:8px;" id="exp_date" value="${todayISO()}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">ملاحظات</label><textarea class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="exp_notes" rows="3"></textarea></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.saveExpense()">حفظ</button>
+  </div></div>`;
+}
+App.saveExpense=()=>{
+  const title=document.getElementById('exp_title').value.trim();
+  const category=document.getElementById('exp_category').value;
+  const amount=parseFloat(document.getElementById('exp_amount').value||'0');
+  const date=document.getElementById('exp_date').value || todayISO();
+  const notes=document.getElementById('exp_notes').value.trim();
+  if(!title || !amount){ toast('أدخل عنوان المصروف والمبلغ','err'); return; }
+  DB.expenses.push({id:uid('ex'),title,category,amount,date,notes,createdAt:new Date().toISOString()});
+  UI.modal=null; save();
+};
+App.deleteExpense=(id)=>{ DB.expenses = DB.expenses.filter(x=>x.id!==id); save(); };
+
+/* ---------------- Pricing ---------------- */
+function pgPricing(){
+  return `
+  <div class="panel">
+    <div class="panel-h"><h3>مدد الحجز وأسعارها</h3><button class="btn btn-brass btn-sm" onclick="App.openDurationForm()">+ إضافة مدة</button></div>
+    <div class="scrollx"><table><thead><tr><th>المدة</th><th>عدد الساعات</th><th>السعر</th><th>إجراءات</th></tr></thead><tbody>
+      ${DB.settings.durations.map(d=>`<tr><td>${esc(d.label)}</td><td class="num">${d.hours}</td><td class="num">${fmtMoney(d.price)}</td>
+        <td style="display:flex;gap:6px;"><button class="btn btn-ghost-dark btn-sm" onclick="App.openDurationForm('${d.id}')">تعديل</button><button class="btn btn-danger btn-sm" onclick="App.deleteDuration('${d.id}')">حذف</button></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="form-row" style="max-width:280px;margin-top:16px;"><label style="color:var(--ink-soft);">سعر الساعة الإضافية عند تجاوز الحجز (${DB.settings.currency})</label>
+      <input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" value="${DB.settings.overtimeRate}" onchange="App.setOvertimeRate(this.value)"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-h"><h3>العروض والباقات المخصصة</h3><button class="btn btn-brass btn-sm" onclick="App.openPackageForm()">+ إضافة باقة</button></div>
+    <div class="scrollx"><table><thead><tr><th>اسم الباقة</th><th>الوصف</th><th>السعر</th><th>إجراءات</th></tr></thead><tbody>
+      ${DB.settings.packages.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.desc)}</td><td class="num">${fmtMoney(p.price)}</td>
+        <td style="display:flex;gap:6px;"><button class="btn btn-ghost-dark btn-sm" onclick="App.openPackageForm('${p.id}')">تعديل</button><button class="btn btn-danger btn-sm" onclick="App.deletePackage('${p.id}')">حذف</button></td></tr>`).join('')||`<tr><td colspan="4" class="empty">لا توجد باقات</td></tr>`}
+    </tbody></table></div>
+  </div>`;
+}
+App.setOvertimeRate=(v)=>{ DB.settings.overtimeRate=parseFloat(v||'0'); save(); };
+App.openDurationForm=(id)=>{ const d=id?durationById(id):null; UI.modal={type:'durationForm',dur:d}; render(); };
+function durationFormModal(m){
+  const d=m.dur;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>${d?'تعديل مدة':'إضافة مدة'}</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">اسم المدة</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="du_label" value="${d?esc(d.label):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">عدد الساعات</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="du_hours" value="${d?d.hours:''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">السعر</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="du_price" value="${d?d.price:''}"></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.saveDuration('${d?d.id:''}')">حفظ</button>
+  </div></div>`;
+}
+App.saveDuration=(id)=>{
+  const label=document.getElementById('du_label').value.trim();
+  const hours=parseFloat(document.getElementById('du_hours').value||'0');
+  const price=parseFloat(document.getElementById('du_price').value||'0');
+  if(!label||!hours||!price){ toast('يرجى تعبئة جميع الحقول','err'); return; }
+  if(id){ const d=durationById(id); Object.assign(d,{label,hours,price}); }
+  else{ DB.settings.durations.push({id:uid('d'),label,hours,price}); }
+  UI.modal=null; save();
+};
+App.deleteDuration=(id)=>{ DB.settings.durations=DB.settings.durations.filter(x=>x.id!==id); save(); };
+App.openPackageForm=(id)=>{ const p=id?DB.settings.packages.find(x=>x.id===id):null; UI.modal={type:'packageForm',pkg:p}; render(); };
+function packageFormModal(m){
+  const p=m.pkg;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>${p?'تعديل باقة':'إضافة باقة'}</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">اسم الباقة</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="pk_name" value="${p?esc(p.name):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الوصف</label><textarea class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="pk_desc" rows="2">${p?esc(p.desc):''}</textarea></div>
+    <div class="form-row"><label style="color:#B7BAC4;">السعر</label><input class="input-dark" type="number" style="width:100%;padding:10px;border-radius:8px;" id="pk_price" value="${p?p.price:''}"></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.savePackage('${p?p.id:''}')">حفظ</button>
+  </div></div>`;
+}
+App.savePackage=(id)=>{
+  const name=document.getElementById('pk_name').value.trim();
+  const desc=document.getElementById('pk_desc').value.trim();
+  const price=parseFloat(document.getElementById('pk_price').value||'0');
+  if(!name||!price){ toast('يرجى تعبئة الحقول','err'); return; }
+  if(id){ const p=DB.settings.packages.find(x=>x.id===id); Object.assign(p,{name,desc,price}); }
+  else DB.settings.packages.push({id:uid('pk'),name,desc,price});
+  UI.modal=null; save();
+};
+App.deletePackage=(id)=>{ DB.settings.packages=DB.settings.packages.filter(x=>x.id!==id); save(); };
+
+/* ---------------- Analytics ---------------- */
+function pgAnalytics(){
+  const range=periodRange(UI.analyticsPeriod);
+  const cins = DB.checkins.filter(c=>inRange(c.entryAt,range));
+  const completed = cins.filter(c=>c.status==='completed');
+  const totalVisitors = cins.length;
+  const phonesInRange = [...new Set(cins.map(c=>c.customerPhone))];
+  const newCustomers = phonesInRange.filter(ph=>{ const c=DB.customers[ph]; return c && inRange(c.firstVisit,range); }).length;
+  const returning = phonesInRange.length-newCustomers;
+  const avgVisitsPerCustomer = phonesInRange.length? (totalVisitors/phonesInRange.length).toFixed(1):0;
+  const avgDuration = completed.length? (completed.reduce((s,c)=>s+c.actualHours,0)/completed.length).toFixed(1):0;
+  const totalUsageHours = completed.reduce((s,c)=>s+c.actualHours,0);
+  const rev = revenueInRange(range);
+  const avgSpend = phonesInRange.length? (rev/phonesInRange.length).toFixed(0):0;
+  const dayCounts=[0,0,0,0,0,0,0]; const hourCounts=Array(24).fill(0);
+  cins.forEach(c=>{ const d=new Date(c.entryAt); dayCounts[d.getDay()]++; hourCounts[d.getHours()]++; });
+  const dayNames=['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+  const busiestDay = dayNames[dayCounts.indexOf(Math.max(...dayCounts))];
+  const busiestHour = hourCounts.indexOf(Math.max(...hourCounts));
+  const periods=[['today','اليوم'],['week','الأسبوع'],['month','الشهر'],['3m','3 أشهر'],['6m','6 أشهر'],['year','السنة'],['custom','فترة مخصصة']];
+  return `
+  <div class="toolbar">
+    <div class="chip-filter">${periods.map(p=>`<span class="chip ${UI.analyticsPeriod===p[0]?'on':''}" onclick="App.setAnalyticsPeriod('${p[0]}')">${p[1]}</span>`).join('')}</div>
+    ${UI.analyticsPeriod==='custom'?`<input type="date" class="input-dark" value="${UI.customFrom}" onchange="App.setCustomFrom(this.value)"> إلى <input type="date" class="input-dark" value="${UI.customTo}" onchange="App.setCustomTo(this.value)">`:''}
+  </div>
+  <div class="kpi-grid">
+    ${kpi('إجمالي الزوار', totalVisitors)}
+    ${kpi('عملاء جدد', newCustomers)}
+    ${kpi('عملاء عائدون', returning)}
+    ${kpi('متوسط الزيارات للعميل', avgVisitsPerCustomer)}
+    ${kpi('متوسط مدة الزيارة (س)', avgDuration)}
+    ${kpi('إجمالي ساعات الاستخدام', Math.round(totalUsageHours))}
+    ${kpi('متوسط إنفاق العميل', fmtMoney(avgSpend))}
+    ${kpi('أكثر يوم ازدحاماً', busiestDay)}
+    ${kpi('أكثر ساعة ازدحاماً', busiestHour+':00')}
+  </div>
+  <div class="panel"><div class="panel-h"><h3>الزيارات حسب أيام الأسبوع</h3></div><canvas id="chartAnalytics" height="170"></canvas></div>`;
+}
+App.setAnalyticsPeriod=(p)=>{UI.analyticsPeriod=p; render();};
+App.setCustomFrom=(v)=>{UI.customFrom=v; render();};
+App.setCustomTo=(v)=>{UI.customTo=v; render();};
+function drawAnalyticsChart(){
+  const el=document.getElementById('chartAnalytics'); if(!el||!window.Chart) return;
+  const range=periodRange(UI.analyticsPeriod);
+  const cins=DB.checkins.filter(c=>inRange(c.entryAt,range));
+  const dayNames=['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+  const counts=[0,0,0,0,0,0,0];
+  cins.forEach(c=>counts[new Date(c.entryAt).getDay()]++);
+  if(el._chart) el._chart.destroy();
+  el._chart=new Chart(el,{type:'bar',data:{labels:dayNames,datasets:[{data:counts,backgroundColor:'#C9A15A',borderRadius:6}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8A8F9C'}},y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#8A8F9C'}}}}});
+}
+
+/* ---------------- Reports ---------------- */
+function pgReports(){
+  const tabs=[['visitors','الزوار'],['bookings','الحجوزات'],['revenue','الإيرادات'],['products','المنتجات'],['customers','العملاء'],['usage','ساعات الاستخدام'],['occupancy','إشغال المقاعد']];
+  return `<div class="panel">
+    <div class="tab-row">${tabs.map(t=>`<div class="tab-btn ${UI.reportTab===t[0]?'on':''}" onclick="App.setReportTab('${t[0]}')">${t[1]}</div>`).join('')}</div>
+    <div class="panel-h"><span class="sub">جدول تفصيلي قابل للتصدير</span><button class="btn btn-brass btn-sm" onclick="App.exportReport()">⬇ تصدير CSV</button></div>
+    <div id="reportTableHolder">${reportTableHTML()}</div>
+  </div>`;
+}
+App.setReportTab=(t)=>{ UI.reportTab=t; render(); };
+function reportRows(){
+  switch(UI.reportTab){
+    case 'visitors': return {head:['العميل','الجوال','وقت الدخول','وقت الخروج','المدة الفعلية'], rows:DB.checkins.map(c=>[c.customerName,c.customerPhone,fmtDT(c.entryAt),c.exitAt?fmtDT(c.exitAt):'—',c.actualHours?c.actualHours.toFixed(1):'—'])};
+    case 'bookings': return {head:['العميل','الجوال','التاريخ','المدة','السعر','الحالة'], rows:DB.bookings.map(b=>[b.customerName,b.customerPhone,fmtDate(b.date),b.durationLabel,b.price,b.status])};
+    case 'revenue': return {head:['المصدر','الوصف','المبلغ','التاريخ'], rows:[
+        ...DB.checkins.filter(c=>c.status==='completed').map(c=>['حجز',c.customerName,c.finalPrice,fmtDT(c.exitAt)]),
+        ...DB.orders.map(o=>['منتجات',o.items.map(i=>i.name).join('/'),o.total,fmtDT(o.createdAt)]) ]};
+    case 'products': return {head:['المنتج','السعر','المخزون','عدد المباع','الإيراد'], rows:DB.products.map(p=>[p.name,p.price,p.stock,p.sold,p.sold*p.price])};
+    case 'customers': return {head:['الاسم','الجوال','الزيارات','الساعات','الإنفاق'], rows:Object.values(DB.customers).map(c=>[c.name,c.phone,c.visits,Math.round(c.totalHours),c.totalSpent])};
+    case 'usage': return {head:['العميل','التاريخ','المدة الفعلية (س)'], rows:DB.checkins.filter(c=>c.status==='completed').map(c=>[c.customerName,fmtDate(c.entryAt),c.actualHours.toFixed(1)])};
+    case 'occupancy': return {head:['المقعد','الحالة الحالية'], rows:DB.seats.map(s=>[s.code,seatLabel(seatStatusNow(s.id))])};
+  }
+}
+function reportTableHTML(){
+  const {head,rows}=reportRows();
+  return `<div class="scrollx"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+  ${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${head.length}" class="empty">لا توجد بيانات</td></tr>`}
+  </tbody></table></div>`;
+}
+App.exportReport=()=>{
+  const {head,rows}=reportRows();
+  let csv='\uFEFF'+head.join(',')+'\n'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='تقرير-'+UI.reportTab+'-'+todayISO()+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+};
+
+/* ---------------- Staff ---------------- */
+function pgStaff(){
+  return `<div class="panel">
+    <div class="panel-h"><h3>حسابات الموظفين</h3><button class="btn btn-brass btn-sm" onclick="App.openStaffForm()">+ إضافة موظف</button></div>
+    <div class="scrollx"><table><thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr></thead><tbody>
+    ${DB.staff.map(s=>`<tr><td>${esc(s.name)}</td><td class="num">${esc(s.username)}</td><td><span class="badge ${s.role==='Admin'?'badge-amber':s.role==='Manager'?'badge-blue':'badge-gray'}">${s.role==='Admin'?'مدير':s.role==='Manager'?'مسؤول عمليات':'موظف'}</span></td>
+      <td style="display:flex;gap:6px;"><button class="btn btn-ghost-dark btn-sm" onclick="App.openStaffForm('${s.id}')">تعديل</button>${s.id!==UI.adminStaff?`<button class="btn btn-danger btn-sm" onclick="App.deleteStaff('${s.id}')">حذف</button>`:''}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>الصلاحيات</h3></div>
+    <div class="grid3">
+      <div><b>مدير (Admin)</b><p style="color:var(--ink-soft);font-size:12.5px;margin-top:6px;">صلاحية كاملة على جميع أقسام النظام.</p></div>
+      <div><b>مسؤول عمليات (Manager)</b><p style="color:var(--ink-soft);font-size:12.5px;margin-top:6px;">إدارة الحجوزات والعملاء والمنتجات والتقارير والأسعار.</p></div>
+      <div><b>موظف (Employee)</b><p style="color:var(--ink-soft);font-size:12.5px;margin-top:6px;">تسجيل الدخول والخروج، بيع المنتجات، ومشاهدة الحجوزات.</p></div>
+    </div>
+  </div>`;
+}
+App.openStaffForm=(id)=>{ const s=id?DB.staff.find(x=>x.id===id):null; UI.modal={type:'staffForm',staff:s}; render(); };
+function staffFormModal(m){
+  const s=m.staff;
+  return `<div class="modal-bg"><div class="modal">
+    <h3>${s?'تعديل موظف':'إضافة موظف'}</h3>
+    <div class="form-row"><label style="color:#B7BAC4;">الاسم</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="sf_name" value="${s?esc(s.name):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">اسم المستخدم</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="sf_user" value="${s?esc(s.username):''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الرمز السري PIN</label><input class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="sf_pin" value="${s?s.pin:''}"></div>
+    <div class="form-row"><label style="color:#B7BAC4;">الدور</label><select class="input-dark" style="width:100%;padding:10px;border-radius:8px;" id="sf_role">
+      <option value="Admin" ${s&&s.role==='Admin'?'selected':''}>مدير (Admin)</option>
+      <option value="Manager" ${s&&s.role==='Manager'?'selected':''}>مسؤول عمليات (Manager)</option>
+      <option value="Employee" ${(!s||s.role==='Employee')?'selected':''}>موظف (Employee)</option>
+    </select></div>
+    <button class="btn btn-brass" style="width:100%;justify-content:center;" onclick="App.saveStaff('${s?s.id:''}')">حفظ</button>
+  </div></div>`;
+}
+App.saveStaff=(id)=>{
+  const name=document.getElementById('sf_name').value.trim();
+  const username=document.getElementById('sf_user').value.trim();
+  const pin=document.getElementById('sf_pin').value.trim();
+  const role=document.getElementById('sf_role').value;
+  if(!name||!username||!pin){ toast('يرجى تعبئة جميع الحقول','err'); return; }
+  if(id){ const s=DB.staff.find(x=>x.id===id); Object.assign(s,{name,username,pin,role}); }
+  else DB.staff.push({id:uid('sf'),name,username,pin,role});
+  UI.modal=null; save();
+};
+App.deleteStaff=(id)=>{
+  UI.modal={type:'confirm',title:'حذف الموظف',text:'هل تريد حذف حساب هذا الموظف؟',confirmLabel:'حذف',onConfirm:`()=>{DB.staff=DB.staff.filter(x=>x.id!=='${id}');save();}`};
+  render();
+};
+
+/* ---------------- Notifications ---------------- */
+function pgNotifications(){
+  const icons={booking:'▤',checkin:'⏱',checkout:'✅',stock:'⚠'};
+  return `<div class="panel">
+    <div class="panel-h"><h3>الإشعارات</h3><button class="btn btn-ghost-dark btn-sm" onclick="App.markAllRead()">تعليم الكل كمقروء</button></div>
+    ${DB.notifications.length? DB.notifications.map(n=>`<div class="notif-item ${n.read?'':'unread'}"><div class="ic">${icons[n.type]||'🔔'}</div><div><div class="t">${esc(n.message)}</div><div class="ts">${fmtDT(n.createdAt)}</div></div></div>`).join('') : '<div class="empty">لا توجد إشعارات</div>'}
+  </div>`;
+}
+App.markAllRead=()=>{ DB.notifications.forEach(n=>n.read=true); save(); };
+
+/* ---------------- misc bindings ---------------- */
+function bindGlobalEvents(){ /* using inline onclick handlers throughout, nothing extra needed */ }
+
+/* ---------------- boot ---------------- */
+(async function boot(){
+  document.getElementById('app').innerHTML = `<div class="login-wrap"><div style="color:#8A8F9C;">جارِ التحميل…</div></div>`;
+  await loadDB();
+  window.history.replaceState(currentRoute(),'');
+  render();
+})();
+</script>
+</body>
+</html>
