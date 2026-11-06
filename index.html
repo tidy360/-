@@ -1762,46 +1762,6 @@ App.savePackage=(id)=>{
   UI.modal=null; save();
 };
 })();
-    /* ---- حقل المبلغ المدفوع في الدخول الفوري ---- */
-function updatePaid(){
-  const el=document.getElementById('wk_paid'); if(!el) return;
-  const dur=durationById(document.getElementById('wk_dur').value);
-  const sub=(document.querySelector('input[name="wk_pay"]:checked')||{}).value;
-  el.value=sub?0:(dur?dur.price:0);
-}
-if(!window.__wkPaidBound){
-  window.__wkPaidBound=true;
-  document.addEventListener('change',e=>{
-    if(e.target&&(e.target.id==='wk_dur'||e.target.name==='wk_pay')) updatePaid();
-  });
-}
-const _wm=walkinModal;
-walkinModal=function(m){
-  const field=`<div class="form-row"><label style="${LB}">المبلغ المدفوع (${DB.settings.currency})</label><input class="input-dark" type="number" min="0" style="${ST}" id="wk_paid" value="0"></div>`;
-  const marker='<div style="display:flex;gap:10px;margin-top:8px;">';
-  setTimeout(updatePaid,0);
-  return _wm(m).replace(marker,()=>field+marker);
-};
-const _wpc=App.walkinPhoneCheck;
-App.walkinPhoneCheck=(v)=>{ _wpc(v); updatePaid(); };
-App.submitWalkin=()=>{
-  const name=document.getElementById('wk_name').value.trim(), phone=document.getElementById('wk_phone').value.trim();
-  const dur=durationById(document.getElementById('wk_dur').value), seatId=document.getElementById('wk_seat').value;
-  const subId=(document.querySelector('input[name="wk_pay"]:checked')||{}).value||'';
-  if(!name||!phone){ toast('يرجى إدخال الاسم والجوال','err'); return; }
-  let paid=parseFloat(document.getElementById('wk_paid').value);
-  if(isNaN(paid)||paid<0){ toast('أدخل مبلغاً صحيحاً','err'); return; }
-  let sub=null;
-  if(subId){ sub=DB.subscriptions.find(x=>x.id===subId);
-    if(!sub||sub.customerPhone!==phone||!subIsActive(sub)){ toast('الاشتراك غير صالح','err'); return; }
-    sub.usedVisits+=1; }
-  upsertCustomer(phone,name);
-  const bid=uid('bk'), now=new Date().toISOString();
-  DB.bookings.push({id:bid,customerPhone:phone,customerName:name,date:todayISO(),time:nowTimeHM(),durationId:dur.id,durationLabel:dur.label,hours:dur.hours,price:paid,people:1,seatId,status:'Checked-in',createdAt:now});
-  DB.checkins.push({id:uid('ci'),bookingId:bid,customerPhone:phone,customerName:name,seatId,entryAt:now,exitAt:null,plannedHours:dur.hours,plannedPrice:paid,actualHours:0,finalPrice:0,status:'active',subId:subId,walkin:true});
-  addNotif('checkin','وصول عميل: '+name+(sub?' (اشتراك)':'')+' — مدفوع '+fmtMoney(paid));
-  UI.modal=null; save();
-};
 </script>
 </body>
 </html>
