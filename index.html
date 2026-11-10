@@ -1762,6 +1762,431 @@ App.savePackage=(id)=>{
   UI.modal=null; save();
 };
 })();
+    <script>
+/* ===== تعديلات: بحث بالاسم عند الدخول + مبلغ مدفوع للاشتراك + خصم + استرجاع منتج ===== */
+(function(){
+const ST='width:100%;padding:10px;border-radius:8px;', LB='color:#B7BAC4;';
+const cur=()=>DB.settings.currency;
+const norm=s=>String(s||'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/\s+/g,' ').trim().toLowerCase();
+
+/* ---------- دوال مساعدة ---------- */
+function subIsActive(s){
+  if(s.status==='cancelled') return false;
+  if(s.expiresAt&&s.expiresAt<todayISO()) return false;
+  if(s.totalVisits>0&&s.usedVisits>=s.totalVisits) return false;
+  return true;
+}
+function activeSubsFor(p){ return (DB.subscriptions||[]).filter(s=>s.customerPhone===p&&subIsActive(s)); }
+function subRemaining(s){ return s.totalVisits>0?(s.totalVisits-s.usedVisits)+' من '+s.totalVisits+' زيارة متبقية':'زيارات غير محدودة ('+s.usedVisits+' مستخدمة)'; }
+function subBadge(s){
+  if(s.status==='cancelled') return '<span class="badge badge-red">ملغى</span>';
+  if(s.totalVisits>0&&s.usedVisits>=s.totalVisits) return '<span class="badge badge-gray">مستنفد</span>';
+  if(s.expiresAt&&s.expiresAt<todayISO()) return '<span class="badge badge-gray">منتهي</span>';
+  return '<span class="badge badge-green">نشط</span>';
+}
+function paidOf(s){ return s.paid!==undefined ? Number(s.paid) : Number(s.price); }
+
+/* ---------- العميل: إضافة حقل السكن ---------- */
+upsertCustomer=function(phone,name,email,address){
+  if(!DB.customers[phone]){
+    DB.customers[phone]={phone,name,email:email||'',address:address||'',firstVisit:new Date().toISOString(),visits:0,totalHours:0,totalSpent:0,lastVisit:null};
+  } else {
+    const c=DB.customers[phone];
+    if(name) c.name=name; if(email) c.email=email; if(address) c.address=address;
+  }
+  return DB.customers[phone];
+};
+
+/* ---------- الإيرادات تحسب المبلغ المدفوع فعلياً ---------- */
+revenueInRange=function(range){
+  const a=DB.checkins.filter(c=>c.status==='completed'&&inRange(c.exitAt,range)).reduce((s,c)=>s+(c.finalPrice||0),0);
+  const b=DB.orders.filter(o=>inRange(o.createdAt,range)).reduce((s,o)=>s+o.total,0);
+  const c=(DB.subscriptions||[]).filter(s=>s.status!=='cancelled'&&inRange(s.createdAt,range)).reduce((s,x)=>s+paidOf(x),0);
+  return a+b+c;
+};
+const _rr=reportRows; reportRows=function(){
+  const r=_rr();
+  if(UI.reportTab==='revenue'&&r){
+    r.rows=r.rows.filter(x=>x[0]!=='اشتراك');
+    (DB.subscriptions||[]).filter(s=>s.status!=='cancelled').forEach(s=>r.rows.push(['اشتراك',s.customerName+' — '+s.packageName,paidOf(s),fmtDT(s.createdAt)]));
+  }
+  return r;
+};
+
+/* ============================================================
+   1) الدخول الفوري: البحث بالاسم
+   ============================================================ */
+let WK={phone:null};
+function wkInfo(phone){
+  const c=DB.customers[phone]; if(!c) return '';
+  const subs=activeSubsFor(phone);
+  const box='background:#111;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;color:#C9CBD3;line-height:1.9;';
+  const lab='display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;color:#EDEBE4;cursor:pointer;';
+  const rd='width:auto;padding:0;margin:0;';
+  return `<div style="${box}">
+    <div style="color:#7fbf9c;font-weight:600;">عميل حالي: ${esc(c.name)} · <span class="num">${esc(c.phone)}</span></div>
+    <div>السكن: ${esc(c.address||'—')}</div>
+    <div>الزيارات: <b class="num">${c.visits}</b> · آخر زيارة: ${fmtDate(c.lastVisit)} · إجمالي المدفوع: ${fmtMoney(c.totalSpent)}</div>
+  </div>
+  <div class="stack" style="margin-bottom:12px;">
+    <label style="${lab}"><input type="radio" name="wk_pay" value="" ${subs.length?'':'checked'} style="${rd}"><span>دفع عادي حسب المدة</span></label>
+    ${subs.map((s,i)=>`<label style="${lab}"><input type="radio" name="wk_pay" value="${s.id}" ${i===0?'checked':''} style="${rd}"><span>اشتراك «${esc(s.packageName)}» — ${subRemaining(s)} · ينتهي ${fmtDate(s.expiresAt)}<br><small style="color:#7fbf9c;">سيتم خصم زيارة واحدة عند تسجيل الدخول</small></span></label>`).join('')}
+  </div>
+  <button class="btn btn-ghost-dark btn-sm" style="margin-bottom:12px;" onclick="App.sellSubFromWalkin()">+ بيع اشتراك لهذا العميل</button>`;
+}
+walkinModal=function(m){
+  m=m||{};
+  WK.phone=(m.phone&&DB.customers[m.phone])?m.phone:null;
+  const sel=WK.phone?DB.customers[WK.phone]:null;
+  const free=DB.seats.filter(s=>seatStatusNow(s.id)==='available');
+  return `<div class="modal-bg"><div class="modal">
+  <h3>حجز يدوي / زيارة فورية</h3>
+  <div class="form-row"><label style="${LB}">اسم العميل (اكتب الاسم للبحث)</label>
+    <input class="input-dark" style="${ST}" id="wk_name" autocomplete="off" value="${esc(sel?sel.name:(m.name||''))}" oninput="App.wkSearch(this.value)"></div>
+  <div id="wk_results"></div>
+  <div id="wk_new" style="display:${sel?'none':'block'};">
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">عميل جديد؟ اكتب رقم الهاتف والسكن وسيتم حفظه، وفي المرة القادمة ابحث باسمه فقط.</div>
+    <div class="form-grid2">
+      <div class="form-row"><label style="${LB}">رقم الهاتف</label><input class="input-dark" style="${ST}" id="wk_phone" value="${esc(m.phone||'')}"></div>
+      <div class="form-row"><label style="${LB}">السكن</label><input class="input-dark" style="${ST}" id="wk_addr" value="${esc(m.addr||'')}"></div>
+    </div>
+  </div>
+  <div id="wk_found">${sel?wkInfo(WK.phone):''}</div>
+  <div class="form-row"><label style="${LB}">المدة</label><select class="input-dark" style="${ST}" id="wk_dur">${DB.settings.durations.map(d=>`<option value="${d.id}">${d.label} — ${d.price} ${cur()}</option>`).join('')}</select></div>
+  <div class="form-row"><label style="${LB}">المقعد</label><select class="input-dark" style="${ST}" id="wk_seat"><option value="">بدون تحديد</option>${free.map(s=>`<option value="${s.id}">${s.code}</option>`).join('')}</select></div>
+  <div style="display:flex;gap:10px;margin-top:8px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.submitWalkin()">تسجيل الدخول الآن</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div>
+  </div></div>`;
+};
+App.openWalkin=(phone,name)=>{ UI.modal={type:'walkin',phone:phone||'',name:name||''}; render(); };
+App.wkSearch=(v)=>{
+  WK.phone=null;
+  const q=norm(v), res=document.getElementById('wk_results');
+  document.getElementById('wk_found').innerHTML='';
+  document.getElementById('wk_new').style.display='block';
+  if(!q){ res.innerHTML=''; return; }
+  const list=Object.values(DB.customers).filter(c=>norm(c.name).includes(q)).slice(0,6);
+  const item='padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer;font-size:13px;background:#111;color:#EDEBE4;display:flex;justify-content:space-between;gap:8px;';
+  res.innerHTML='<div style="margin-bottom:8px;">'
+    +list.map(c=>`<div style="${item}" onclick="App.wkPick('${esc(c.phone)}')"><span>${esc(c.name)}</span><span style="color:var(--ink-soft);" class="num">${esc(c.phone)} · ${c.visits} زيارة</span></div>`).join('')
+    +`<div style="${item}border-style:dashed;color:var(--brass-l);" onclick="App.wkNew()">+ عميل جديد باسم «${esc(v.trim())}»</div></div>`;
+};
+App.wkPick=(phone)=>{
+  const c=DB.customers[phone]; if(!c) return;
+  WK.phone=phone;
+  document.getElementById('wk_name').value=c.name;
+  document.getElementById('wk_results').innerHTML='';
+  document.getElementById('wk_new').style.display='none';
+  document.getElementById('wk_found').innerHTML=wkInfo(phone);
+};
+App.wkNew=()=>{
+  WK.phone=null;
+  document.getElementById('wk_results').innerHTML='';
+  document.getElementById('wk_new').style.display='block';
+  document.getElementById('wk_found').innerHTML='';
+  const p=document.getElementById('wk_phone'); if(p) p.focus();
+};
+App.walkinPhoneCheck=()=>{};
+App.sellSubFromWalkin=()=>{
+  const name=document.getElementById('wk_name').value.trim();
+  const phone=WK.phone||document.getElementById('wk_phone').value.trim();
+  const addr=WK.phone?'':document.getElementById('wk_addr').value.trim();
+  if(!name||phone.length<8){ toast('أدخل الاسم ورقم الهاتف أولاً','err'); return; }
+  UI.modal={type:'sellSub',pkgId:'',phone,name,returnTo:'walkin',addr};
+  render();
+};
+App.submitWalkin=()=>{
+  const name=document.getElementById('wk_name').value.trim();
+  const isNew=!WK.phone;
+  const phone=isNew?document.getElementById('wk_phone').value.trim():WK.phone;
+  const addr=isNew?document.getElementById('wk_addr').value.trim():'';
+  const dur=durationById(document.getElementById('wk_dur').value), seatId=document.getElementById('wk_seat').value;
+  const subId=(document.querySelector('input[name="wk_pay"]:checked')||{}).value||'';
+  if(!name){ toast('اكتب اسم العميل','err'); return; }
+  if(isNew){
+    if(phone.length<8){ toast('عميل جديد: أدخل رقم هاتف صحيح','err'); return; }
+    if(DB.customers[phone]){ toast('هذا الرقم مسجل باسم «'+DB.customers[phone].name+'» — ابحث عنه بالاسم','err'); return; }
+  }
+  let sub=null;
+  if(subId){
+    sub=DB.subscriptions.find(x=>x.id===subId);
+    if(!sub||sub.customerPhone!==phone||!subIsActive(sub)){ toast('الاشتراك غير صالح','err'); return; }
+    sub.usedVisits+=1;
+  }
+  const price=sub?0:dur.price;
+  upsertCustomer(phone,name,'',addr);
+  const bid=uid('bk'), now=new Date().toISOString();
+  DB.bookings.push({id:bid,customerPhone:phone,customerName:name,date:todayISO(),time:nowTimeHM(),durationId:dur.id,durationLabel:dur.label,hours:dur.hours,price,people:1,seatId,status:'Checked-in',createdAt:now});
+  DB.checkins.push({id:uid('ci'),bookingId:bid,customerPhone:phone,customerName:name,seatId,entryAt:now,exitAt:null,plannedHours:dur.hours,plannedPrice:price,actualHours:0,finalPrice:0,status:'active',subId:subId,walkin:true});
+  addNotif('checkin','وصول عميل: '+name+(sub?' (اشتراك)':''));
+  UI.modal=null; save();
+};
+
+/* السكن يظهر في تفاصيل العميل */
+const _cd=customerDetailModal; customerDetailModal=function(m){
+  const h=_cd(m), c=DB.customers[m.phone];
+  if(!c||!c.address) return h;
+  return h.replace('<div class="mini-stats"',()=>`<div style="font-size:12.5px;color:var(--ink-soft);margin:-6px 0 12px;">السكن: ${esc(c.address)}</div><div class="mini-stats"`);
+};
+
+/* ============================================================
+   2) بيع الاشتراك: أسعار واضحة + المبلغ المدفوع يدوي
+   ============================================================ */
+function sellSubModal(m){
+  const pk=DB.settings.packages, known=m.phone?DB.customers[m.phone]:null;
+  if(!pk.length) return `<div class="modal-bg"><div class="modal"><h3>بيع اشتراك</h3><div class="empty">أضف باقة أولاً من صفحة الأسعار والباقات</div><button class="btn btn-ghost-dark" style="width:100%;justify-content:center;" onclick="App.closeModal()">إغلاق</button></div></div>`;
+  const sel=pk.find(p=>p.id===m.pkgId)||pk[0];
+  const card='display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;cursor:pointer;color:#EDEBE4;';
+  return `<div class="modal-bg"><div class="modal" style="max-width:520px;"><h3>بيع اشتراك لعميل</h3>
+  <div class="form-grid2">
+    <div class="form-row"><label style="${LB}">رقم الجوال</label><input class="input-dark" style="${ST}" id="ss_phone" value="${esc(m.phone||'')}" oninput="App.sellSubPhoneCheck(this.value)"></div>
+    <div class="form-row"><label style="${LB}">اسم العميل</label><input class="input-dark" style="${ST}" id="ss_name" value="${esc(m.name||(known?known.name:''))}"></div>
+  </div>
+  <div class="form-row"><label style="${LB}">اختر الباقة (السعر ظاهر بجانب كل باقة)</label>
+    <div class="stack">
+    ${pk.map(p=>`<label style="${card}"><span style="display:flex;align-items:center;gap:9px;"><input type="radio" name="ss_pkg" value="${p.id}" ${p.id===sel.id?'checked':''} onchange="App.ssPkg()" style="width:auto;padding:0;margin:0;">
+      <span><b>${esc(p.name)}</b><br><small style="color:var(--ink-soft);">${p.visits>0?p.visits+' زيارة':'زيارات غير محدودة'} · صلاحية ${p.days} يوم</small></span></span>
+      <span class="num" style="font-family:'Amiri',serif;font-size:20px;font-weight:700;color:var(--brass-l);white-space:nowrap;">${p.price} ${cur()}</span></label>`).join('')}
+    </div></div>
+  <div class="price-total"><span class="t">سعر الباقة</span><span class="v num" id="ss_price_txt">${sel.price} ${cur()}</span></div>
+  <div class="form-grid2">
+    <div class="form-row"><label style="${LB}">المبلغ المدفوع (اكتبه يدوياً)</label><input class="input-dark" type="number" min="0" style="${ST}" id="ss_paid" value="${sel.price}" oninput="App.ssCalc()"></div>
+    <div class="form-row"><label style="${LB}">المتبقي على العميل</label><div id="ss_rest" class="input-dark num" style="${ST}">0 ${cur()}</div></div>
+  </div>
+  <div class="form-row"><label style="${LB}">تاريخ بداية الاشتراك</label><input class="input-dark" type="date" style="${ST}" id="ss_start" value="${todayISO()}"></div>
+  <div style="display:flex;gap:10px;margin-top:8px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.submitSellSub('${esc(m.returnTo||'')}')">تأكيد الاشتراك</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div></div></div>`;
+}
+function ssSelected(){ const v=(document.querySelector('input[name="ss_pkg"]:checked')||{}).value; return DB.settings.packages.find(p=>p.id===v); }
+App.ssPkg=()=>{
+  const p=ssSelected(); if(!p) return;
+  document.getElementById('ss_price_txt').textContent=p.price+' '+cur();
+  document.getElementById('ss_paid').value=p.price;
+  App.ssCalc();
+};
+App.ssCalc=()=>{
+  const p=ssSelected(); if(!p) return;
+  const paid=parseFloat(document.getElementById('ss_paid').value||'0')||0;
+  const rest=Math.max(0,p.price-paid);
+  document.getElementById('ss_rest').textContent=rest+' '+cur()+(paid>p.price?' (المدفوع أكبر من السعر)':'');
+};
+App.sellSubPhoneCheck=(v)=>{ const c=DB.customers[v.trim()]; if(c) document.getElementById('ss_name').value=c.name; };
+App.submitSellSub=(returnTo)=>{
+  const phone=document.getElementById('ss_phone').value.trim(), name=document.getElementById('ss_name').value.trim();
+  const pk=ssSelected();
+  const start=document.getElementById('ss_start').value||todayISO();
+  const paidRaw=parseFloat(document.getElementById('ss_paid').value);
+  if(!phone||!name||!pk){ toast('يرجى إدخال الجوال والاسم واختيار الباقة','err'); return; }
+  if(isNaN(paidRaw)||paidRaw<0){ toast('اكتب المبلغ المدفوع','err'); return; }
+  const addr=(UI.modal&&UI.modal.addr)||'';
+  const d=new Date(start+'T12:00:00'); d.setDate(d.getDate()+(pk.days||30));
+  upsertCustomer(phone,name,'',addr).totalSpent+=paidRaw;
+  DB.subscriptions.push({id:uid('sub'),customerPhone:phone,customerName:name,packageId:pk.id,packageName:pk.name,totalVisits:pk.visits||0,usedVisits:0,price:pk.price,paid:paidRaw,startDate:start,expiresAt:d.toISOString().slice(0,10),status:'active',createdAt:new Date().toISOString()});
+  addNotif('booking','اشتراك جديد: '+name+' — '+pk.name+' (مدفوع '+paidRaw+')');
+  UI.modal=returnTo==='walkin'?{type:'walkin',phone,name}:null;
+  toast('تم تسجيل الاشتراك'); save();
+};
+App.doCancelSub=(id)=>{
+  const s=DB.subscriptions.find(x=>x.id===id); if(!s) return; s.status='cancelled';
+  const c=DB.customers[s.customerPhone]; if(c) c.totalSpent=Math.max(0,c.totalSpent-paidOf(s)); save();
+};
+App.paySub=(id)=>{
+  const s=DB.subscriptions.find(x=>x.id===id); if(!s) return;
+  const rest=Math.max(0,s.price-paidOf(s));
+  const v=parseFloat(prompt('المتبقي '+rest+' '+cur()+' — اكتب المبلغ المسدد الآن:',rest));
+  if(isNaN(v)||v<=0) return;
+  s.paid=paidOf(s)+v;
+  const c=DB.customers[s.customerPhone]; if(c) c.totalSpent+=v;
+  toast('تم تسجيل الدفعة'); save();
+};
+
+/* صفحة الأسعار: سعر الباقة بارز + جدول الاشتراكات بالمدفوع والمتبقي */
+const _pp=pgPricing; pgPricing=function(){
+  let h=_pp();
+  h=h.replace(/<td class="num">([^<]*)<\/td>(<td style="display:flex;gap:6px;"><button class="btn btn-brass btn-sm" onclick="App\.openSellSub)/g,
+    '<td class="num" style="color:var(--brass-l);font-weight:700;font-size:15px;">$1</td>$2');
+  const mark='<div class="panel"><div class="panel-h"><h3>اشتراكات العملاء</h3></div>';
+  const i=h.indexOf(mark); if(i<0) return h;
+  const subs=[...(DB.subscriptions||[])].reverse();
+  return h.slice(0,i)+`<div class="panel"><div class="panel-h"><h3>اشتراكات العملاء</h3></div>
+  <div class="scrollx"><table><thead><tr><th>العميل</th><th>الجوال</th><th>الباقة</th><th>السعر</th><th>المدفوع</th><th>المتبقي مالياً</th><th>الزيارات</th><th>ينتهي</th><th>الحالة</th><th></th></tr></thead><tbody>
+  ${subs.length?subs.map(s=>{
+    const rest=Math.max(0,s.price-paidOf(s));
+    return `<tr><td>${esc(s.customerName)}</td><td class="num">${esc(s.customerPhone)}</td><td>${esc(s.packageName)}</td>
+    <td class="num">${fmtMoney(s.price)}</td><td class="num">${fmtMoney(paidOf(s))}</td>
+    <td class="num" style="${rest>0?'color:#e08a7c;font-weight:700;':''}">${rest>0?fmtMoney(rest):'—'}</td>
+    <td>${subRemaining(s)}</td><td>${fmtDate(s.expiresAt)}</td><td>${subBadge(s)}</td>
+    <td style="display:flex;gap:6px;">${s.status!=='cancelled'&&rest>0?`<button class="btn btn-brass btn-sm" onclick="App.paySub('${s.id}')">تسديد</button>`:''}${subIsActive(s)?`<button class="btn btn-danger btn-sm" onclick="App.cancelSub('${s.id}')">إلغاء الاشتراك</button>`:''}</td></tr>`;
+  }).join(''):'<tr><td colspan="10" class="empty">لا توجد اشتراكات بعد</td></tr>'}
+  </tbody></table></div></div>`;
+};
+
+/* ============================================================
+   3) خصم مبلغ عند تسجيل الخروج
+   ============================================================ */
+function coBase(c){
+  const elapsedH=(Date.now()-new Date(c.entryAt).getTime())/3600000;
+  const over=Math.max(0,elapsedH-c.plannedHours);
+  return {elapsedH,over,base:c.plannedPrice+Math.ceil(over)*DB.settings.overtimeRate};
+}
+checkoutModal=function(m){
+  const c=DB.checkins.find(x=>x.id===m.ciId); if(!c) return '';
+  const k=coBase(c);
+  return `<div class="modal-bg"><div class="modal">
+  <h3>تسجيل خروج — ${esc(c.customerName)}</h3>
+  <div class="stack" style="font-size:13.5px;color:#C9CBD3;">
+    <div style="display:flex;justify-content:space-between;"><span>وقت الدخول</span><span>${fmtDT(c.entryAt)}</span></div>
+    <div style="display:flex;justify-content:space-between;"><span>المدة الفعلية</span><span class="num">${k.elapsedH.toFixed(1)} ساعة</span></div>
+    <div style="display:flex;justify-content:space-between;"><span>المدة المحجوزة</span><span class="num">${c.plannedHours} ساعة</span></div>
+    ${k.over>0?`<div style="display:flex;justify-content:space-between;color:#e0b57c;"><span>ساعات إضافية</span><span class="num">${Math.ceil(k.over)} × ${DB.settings.overtimeRate} ${cur()}</span></div>`:''}
+    <div style="display:flex;justify-content:space-between;"><span>المبلغ قبل الخصم</span><span class="num">${k.base} ${cur()}</span></div>
+  </div>
+  <div class="form-row" style="margin-top:12px;"><label style="${LB}">خصم مبلغ (اختياري)</label><input class="input-dark" type="number" min="0" value="0" style="${ST}" id="co_disc" oninput="App.coUpdate('${c.id}')"></div>
+  <div class="price-total"><span class="t">السعر النهائي</span><span class="v num" id="co_final">${k.base} ${cur()}</span></div>
+  <div style="display:flex;gap:10px;">
+    <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.doCheckout('${c.id}')">تأكيد الخروج والدفع</button>
+    <button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button>
+  </div></div></div>`;
+};
+App.coUpdate=(id)=>{
+  const c=DB.checkins.find(x=>x.id===id); if(!c) return;
+  const base=coBase(c).base;
+  const d=Math.min(Math.max(0,parseFloat(document.getElementById('co_disc').value||'0')||0),base);
+  document.getElementById('co_final').textContent=(base-d)+' '+cur();
+};
+App.doCheckout=(ciId)=>{
+  const c=DB.checkins.find(x=>x.id===ciId); if(!c) return;
+  const k=coBase(c);
+  const el=document.getElementById('co_disc');
+  const disc=Math.min(Math.max(0,parseFloat(el?el.value:'0')||0),k.base);
+  const finalPrice=k.base-disc;
+  c.exitAt=new Date().toISOString(); c.actualHours=k.elapsedH; c.finalPrice=finalPrice; c.discount=disc; c.status='completed';
+  if(c.bookingId){ const b=DB.bookings.find(x=>x.id===c.bookingId); if(b) b.status='Completed'; }
+  const cust=upsertCustomer(c.customerPhone,c.customerName);
+  cust.visits+=1; cust.totalHours+=k.elapsedH; cust.totalSpent+=finalPrice; cust.lastVisit=c.exitAt;
+  addNotif('checkout','تسجيل خروج: '+c.customerName+' — '+fmtMoney(finalPrice)+(disc?' (خصم '+disc+')':''));
+  UI.modal=null; save();
+};
+
+/* ============================================================
+   4) نقطة البيع: خصم مبلغ
+   ============================================================ */
+let posDisc=0, posPhone='';
+function posSub(){ return posCart.reduce((s,i)=>s+i.price*i.qty,0); }
+posModal=function(){
+  const sub=posSub(), disc=Math.min(Math.max(0,posDisc),sub), total=sub-disc;
+  return `<div class="modal-bg"><div class="modal" style="max-width:520px;">
+  <h3>نقطة بيع سريعة</h3>
+  <div class="prod-grid" style="margin-bottom:16px;">
+    ${DB.products.map(p=>`<div class="prod-card" style="cursor:pointer;background:var(--ink3);border-color:var(--line);" onclick="App.addToCart('${p.id}')"><div class="prod-emoji">${p.emoji}</div><div class="prod-name">${esc(p.name)}</div><div class="prod-price">${fmtMoney(p.price)}</div></div>`).join('')}
+  </div>
+  ${posCart.length?`<div class="stack" style="margin-bottom:10px;">${posCart.map((i,idx)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;"><span>${i.emoji} ${esc(i.name)} ×${i.qty}</span><span class="num">${fmtMoney(i.price*i.qty)} <button class="btn btn-danger btn-sm" style="padding:2px 8px;margin-right:6px;" onclick="App.removeFromCart(${idx})">×</button></span></div>`).join('')}</div>`:'<div class="empty">السلة فارغة — اضغط على منتج لإضافته</div>'}
+  <div class="form-grid2">
+    <div class="form-row"><label style="${LB}">جوال العميل (اختياري)</label><input class="input-dark" style="${ST}" id="pos_phone" value="${esc(posPhone)}" oninput="posPhoneSet(this.value)"></div>
+    <div class="form-row"><label style="${LB}">خصم مبلغ (اختياري)</label><input class="input-dark" type="number" min="0" style="${ST}" id="pos_disc" value="${posDisc||''}" oninput="App.posDiscChange(this.value)"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:13px;color:#C9CBD3;margin-bottom:6px;"><span>المجموع قبل الخصم</span><span class="num" id="pos_sub">${sub} ${cur()}</span></div>
+  <div class="price-total"><span class="t">الإجمالي بعد الخصم</span><span class="v num" id="pos_total">${total} ${cur()}</span></div>
+  <div style="display:flex;gap:10px;">
+    <button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.completeSale()" ${posCart.length?'':'disabled'}>إتمام البيع</button>
+    <button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button>
+  </div></div></div>`;
+};
+window.posPhoneSet=(v)=>{ posPhone=v; };
+App.posDiscChange=(v)=>{
+  posDisc=Math.max(0,parseFloat(v||'0')||0);
+  const sub=posSub(), disc=Math.min(posDisc,sub);
+  document.getElementById('pos_total').textContent=(sub-disc)+' '+cur();
+};
+App.openPOS=()=>{ posCart=[]; posDisc=0; posPhone=''; UI.modal={type:'pos'}; render(); };
+App.completeSale=()=>{
+  if(!posCart.length) return;
+  const phone=(posPhone||'').trim();
+  const sub=posSub(), disc=Math.min(Math.max(0,posDisc),sub), total=sub-disc;
+  DB.orders.push({id:uid('or'),items:posCart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price})),subtotal:sub,discount:disc,total,customerPhone:phone||'',staff:currentStaff()?.name||'',createdAt:new Date().toISOString()});
+  posCart.forEach(i=>{ const p=DB.products.find(x=>x.id===i.productId); if(p){ p.stock-=i.qty; p.sold+=i.qty; if(p.stock<5) addNotif('stock','مخزون منخفض: '+p.name+' ('+p.stock+' متبقي)'); } });
+  if(phone&&DB.customers[phone]) DB.customers[phone].totalSpent+=total;
+  posCart=[]; posDisc=0; posPhone=''; UI.modal=null; toast('تم تسجيل عملية البيع'); save();
+};
+
+/* ============================================================
+   5) استرجاع منتج + خصم المبلغ المسترجع
+   ============================================================ */
+const _pg=pgProducts; pgProducts=function(){
+  let h=_pg();
+  const mark='<div class="panel"><div class="panel-h"><h3>آخر المبيعات</h3></div>';
+  const i=h.indexOf(mark); if(i<0) return h;
+  const rows=[...DB.orders].reverse().slice(0,30);
+  return h.slice(0,i)+`<div class="panel"><div class="panel-h"><h3>آخر المبيعات</h3><span class="sub">اضغط «استرجاع» بجانب الفاتورة لإرجاع منتج وخصم المبلغ</span></div>
+  ${rows.length?`<div class="scrollx"><table><thead><tr><th>الوقت</th><th>العميل</th><th>المنتجات</th><th>الخصم</th><th>الإجمالي</th><th>المرتجع</th><th></th></tr></thead><tbody>
+  ${rows.map(o=>{
+    const ret=(o.returns||[]);
+    const retAmt=ret.reduce((s,r)=>s+r.amount,0);
+    return `<tr><td>${fmtDT(o.createdAt)}</td><td>${o.customerPhone?esc(DB.customers[o.customerPhone]?.name||o.customerPhone):'زبون عابر'}</td>
+    <td>${o.items.length?o.items.map(x=>esc(x.name)+' ×'+x.qty).join('، '):'—'}</td>
+    <td class="num">${o.discount?fmtMoney(o.discount):'—'}</td><td class="num">${fmtMoney(o.total)}</td>
+    <td>${ret.length?`<span class="badge badge-red">${ret.map(r=>r.items.map(x=>esc(x.name)+'×'+x.qty).join('، ')).join(' | ')} (−${fmtMoney(retAmt)})</span>`:'—'}</td>
+    <td>${o.items.length?`<button class="btn btn-ghost-dark btn-sm" onclick="App.openReturn('${o.id}')">↩ استرجاع</button>`:''}</td></tr>`;
+  }).join('')}
+  </tbody></table></div>`:'<div class="empty">لا توجد مبيعات بعد</div>'}</div>`;
+};
+App.openReturn=(id)=>{ UI.modal={type:'returnProduct',orderId:id}; render(); };
+function rtRatio(o){ const s=o.items.reduce((a,i)=>a+i.price*i.qty,0); return s>0?o.total/s:1; }
+function returnModal(m){
+  const o=DB.orders.find(x=>x.id===m.orderId); if(!o) return '';
+  return `<div class="modal-bg"><div class="modal">
+  <h3>استرجاع منتج</h3>
+  <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:12px;">فاتورة ${fmtDT(o.createdAt)} — اكتب الكمية المراد إرجاعها من كل منتج. ${o.discount?'سيُحتسب المبلغ بنسبة الخصم الذي أُعطي في الفاتورة، ويمكنك تعديله.':''}</div>
+  <div class="stack" style="margin-bottom:12px;">
+  ${o.items.map((i,idx)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13.5px;"><span>${esc(i.name)} — ${i.qty} × ${i.price}</span><input class="input-dark" type="number" min="0" max="${i.qty}" value="0" id="rt_q_${idx}" style="width:80px;padding:6px 8px;" oninput="App.rtCalc('${o.id}')"></div>`).join('')}
+  </div>
+  <div class="form-row"><label style="${LB}">المبلغ المسترجع للعميل (${cur()}) — يمكن تعديله</label><input class="input-dark" type="number" min="0" style="${ST}" id="rt_amt" value="0"></div>
+  <div style="display:flex;gap:10px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.doReturn('${o.id}')">تأكيد الاسترجاع</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div>
+  </div></div>`;
+}
+App.rtCalc=(id)=>{
+  const o=DB.orders.find(x=>x.id===id); if(!o) return;
+  const ratio=rtRatio(o); let sum=0;
+  o.items.forEach((i,idx)=>{
+    const el=document.getElementById('rt_q_'+idx);
+    let q=Math.max(0,Math.min(i.qty,parseInt(el.value||'0',10)||0));
+    sum+=i.price*q*ratio;
+  });
+  document.getElementById('rt_amt').value=Math.round(sum*100)/100;
+};
+App.doReturn=(id)=>{
+  const o=DB.orders.find(x=>x.id===id); if(!o) return;
+  const picked=[];
+  o.items.forEach((i,idx)=>{
+    const q=Math.max(0,Math.min(i.qty,parseInt(document.getElementById('rt_q_'+idx).value||'0',10)||0));
+    if(q>0) picked.push({idx,q});
+  });
+  if(!picked.length){ toast('اختر كمية للاسترجاع','err'); return; }
+  const refund=Math.min(Math.max(0,parseFloat(document.getElementById('rt_amt').value||'0')||0),o.total);
+  const logItems=[];
+  picked.forEach(({idx,q})=>{
+    const it=o.items[idx];
+    const p=DB.products.find(x=>x.id===it.productId);
+    if(p){ p.stock+=q; p.sold=Math.max(0,p.sold-q); }
+    it.qty-=q; logItems.push({name:it.name,qty:q});
+  });
+  o.items=o.items.filter(i=>i.qty>0);
+  o.total=Math.max(0,o.total-refund);
+  o.returns=(o.returns||[]); o.returns.push({at:new Date().toISOString(),items:logItems,amount:refund,staff:currentStaff()?.name||''});
+  if(o.customerPhone&&DB.customers[o.customerPhone]) DB.customers[o.customerPhone].totalSpent=Math.max(0,DB.customers[o.customerPhone].totalSpent-refund);
+  addNotif('checkout','استرجاع منتج: '+logItems.map(x=>x.name+'×'+x.qty).join('، ')+' — خصم '+fmtMoney(refund));
+  UI.modal=null; toast('تم الاسترجاع وخصم المبلغ'); save();
+};
+
+/* ---------- ربط النوافذ ---------- */
+const _rm=renderModal; renderModal=function(){
+  const m=UI.modal, t=m&&m.type;
+  if(t==='sellSub'||t==='returnProduct'){
+    const h=document.createElement('div'); document.body.appendChild(h);
+    h.outerHTML=t==='sellSub'?sellSubModal(m):returnModal(m); return;
+  }
+  _rm();
+};
+})();
+</script>
 </script>
 </body>
 </html>
