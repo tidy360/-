@@ -2188,5 +2188,257 @@ const _rm=renderModal; renderModal=function(){
 };
 })();
 </script>
+  <script>
+/* ===== تعديلات: تعديل العميل + فلترة التقارير بالتاريخ + تحديث مباشر + بقاء الجلسة ===== */
+(function(){
+const ST='width:100%;padding:10px;border-radius:8px;', LB='color:#B7BAC4;';
+const LRI='\u2066', PDI='\u2069';
+const ltr=s=>LRI+s+PDI;
+const p2=n=>String(n).padStart(2,'0');
+const CID='c_'+Math.random().toString(36).slice(2)+Date.now().toString(36);
+let seq=0;
+
+/* ---------- تواريخ محلية + عرض التاريخ بشكل صحيح (يوم/شهر/سنة) ---------- */
+fmtDT=function(iso){
+  if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return '—';
+  return ltr(p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+' · '+p2(d.getHours())+':'+p2(d.getMinutes()));
+};
+function lDate(x){ if(!x) return ''; const d=x instanceof Date?x:new Date(x); if(isNaN(d)) return ''; return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
+const lToday=()=>lDate(new Date());
+
+/* ============================================================
+   1) بقاء الجلسة: الرفرش يرجع لنفس الصفحة بدون تسجيل دخول
+   ============================================================ */
+const SK='ahlam_session_v1', SESSION_HOURS=24;
+function saveSession(){
+  try{ if(UI.adminAuthed&&UI.adminStaff) localStorage.setItem(SK,JSON.stringify({staff:UI.adminStaff,page:UI.adminPage,tab:UI.reportTab,at:Date.now()})); }catch(e){}
+}
+function clearSession(){ try{ localStorage.removeItem(SK); }catch(e){} }
+function restoreSession(){
+  try{
+    const s=JSON.parse(localStorage.getItem(SK)||'null');
+    if(!s||Date.now()-s.at>SESSION_HOURS*3600000) return;
+    const st=DB&&DB.staff.find(x=>x.id===s.staff);
+    if(!st){ clearSession(); return; }
+    UI.adminAuthed=true; UI.adminStaff=st.id; UI.modal=null;
+    const allowed=NAV.filter(n=>n.roles.includes(st.role)).map(n=>n.id);
+    UI.adminPage=allowed.includes(s.page)?s.page:'dashboard';
+    if(s.tab) UI.reportTab=s.tab;
+    window.history.replaceState(currentRoute(),'');
+  }catch(e){}
+}
+let restored=false;
+const _render=render;
+render=function(){
+  if(!restored){ restored=true; if(DB) restoreSession(); }
+  _render();
+  if(UI.adminAuthed) saveSession();
+};
+const _lo=App.staffLogout;
+App.staffLogout=()=>{ clearSession(); _lo(); };
+
+/* ============================================================
+   2) التحديث المباشر على كل الأجهزة (Realtime + فحص احتياطي كل 6 ثوانٍ)
+   ============================================================ */
+const _persist=persist;
+persist=function(){
+  if(DB){ DB._by=CID; DB._v=CID+':'+(++seq)+':'+Date.now(); }
+  return _persist();
+};
+let pulling=false, again=false, pendingRender=false, tm=null;
+function safeToRender(){
+  if(UI.modal) return false;
+  const a=document.activeElement;
+  if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+  return true;
+}
+function scheduleRender(){ if(safeToRender()) render(); else pendingRender=true; }
+setInterval(()=>{ if(pendingRender&&safeToRender()){ pendingRender=false; render(); } },1000);
+
+function applyRemote(nd){
+  const old=new Set((DB.notifications||[]).map(n=>n.id));
+  DB=nd; ensureShape();
+  (DB.notifications||[]).filter(n=>!old.has(n.id)).slice(0,3).reverse().forEach(n=>toast('🔔 '+n.message));
+  if(UI.adminAuthed&&!currentStaff()){ UI.adminAuthed=false; UI.adminStaff=null; clearSession(); }
+  scheduleRender();
+}
+async function pullIfNewer(){
+  if(!DB) return;
+  if(pulling||saving||saveQueued){ again=true; setTimeout(()=>{ if(again){ again=false; pullIfNewer(); } },700); return; }
+  pulling=true;
+  try{
+    const m=await sb.from('app_state').select('rv:data->>_v,rby:data->>_by').eq('id',1).maybeSingle();
+    if(!m.error&&m.data){
+      if(!m.data.rv||m.data.rby===CID||m.data.rv===DB._v) return;
+    }
+    const f=await sb.from('app_state').select('data').eq('id',1).single();
+    const nd=f.data&&f.data.data;
+    if(f.error||!nd||!nd._v||nd._by===CID||nd._v===DB._v) return;
+    if(saving||saveQueued) return;
+    applyRemote(nd);
+  }catch(e){ console.warn('pull failed',e); }
+  finally{ pulling=false; }
+}
+function pullSoon(){ clearTimeout(tm); tm=setTimeout(pullIfNewer,250); }
+try{
+  sb.channel('ahlam_live').on('postgres_changes',{event:'*',schema:'public',table:'app_state'},(p)=>{
+    const by=p&&p.new&&p.new.data&&p.new.data._by;
+    if(by===CID) return;
+    pullSoon();
+  }).subscribe();
+}catch(e){ console.warn('realtime off',e); }
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pullIfNewer(); });
+window.addEventListener('focus',pullSoon);
+setInterval(()=>{ if(!document.hidden) pullIfNewer(); },6000);
+
+/* ============================================================
+   3) تعديل بيانات العميل
+   ============================================================ */
+const _pcu=pgCustomers;
+pgCustomers=function(){
+  return _pcu().replace(/(<button class="btn btn-ghost-dark btn-sm" onclick="App\.openCustomer\('([^']*)'\)">التفاصيل<\/button>)/g,
+    (m,btn,ph)=>btn+` <button class="btn btn-ghost-dark btn-sm" style="margin-right:6px;" onclick="App.openEditCustomer('${ph}')">✎ تعديل</button>`);
+};
+const _cd2=customerDetailModal;
+customerDetailModal=function(m){
+  return _cd2(m).replace('<button class="btn btn-ghost-dark" style="width:100%;justify-content:center;margin-top:14px;" onclick="App.closeModal()">إغلاق</button>',
+    ()=>`<div style="display:flex;gap:10px;margin-top:14px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.openEditCustomer('${esc(m.phone)}')">✎ تعديل البيانات</button><button class="btn btn-ghost-dark" style="flex:1;justify-content:center;" onclick="App.closeModal()">إغلاق</button></div>`);
+};
+function editCustomerModal(m){
+  const c=DB.customers[m.phone]; if(!c) return '';
+  return `<div class="modal-bg"><div class="modal"><h3>تعديل بيانات العميل</h3>
+  <div class="form-row"><label style="${LB}">الاسم</label><input class="input-dark" style="${ST}" id="ec_name" value="${esc(c.name)}"></div>
+  <div class="form-row"><label style="${LB}">رقم الهاتف</label><input class="input-dark" style="${ST}" id="ec_phone" value="${esc(c.phone)}"></div>
+  <div class="form-row"><label style="${LB}">السكن</label><input class="input-dark" style="${ST}" id="ec_addr" value="${esc(c.address||'')}"></div>
+  <div class="form-row"><label style="${LB}">البريد الإلكتروني (اختياري)</label><input class="input-dark" style="${ST}" id="ec_email" value="${esc(c.email||'')}"></div>
+  <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;line-height:1.7;">عند تغيير الاسم أو الرقم يتم تحديثه تلقائياً في كل حجوزاته واشتراكاته ومشترياته وسجل دخوله.</div>
+  <div style="display:flex;gap:10px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="App.saveCustomerEdit('${esc(c.phone)}')">حفظ التعديلات</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div>
+  </div></div>`;
+}
+App.openEditCustomer=(phone)=>{ UI.modal={type:'editCustomer',phone}; render(); };
+App.saveCustomerEdit=(oldPhone)=>{
+  const name=document.getElementById('ec_name').value.trim();
+  const phone=document.getElementById('ec_phone').value.trim();
+  const addr=document.getElementById('ec_addr').value.trim();
+  const email=document.getElementById('ec_email').value.trim();
+  const c=DB.customers[oldPhone]; if(!c){ UI.modal=null; render(); return; }
+  if(!name){ toast('اكتب اسم العميل','err'); return; }
+  if(phone.length<8){ toast('أدخل رقم هاتف صحيح','err'); return; }
+  if(phone!==oldPhone){
+    if(DB.customers[phone]){ toast('هذا الرقم مسجل للعميل «'+DB.customers[phone].name+'»','err'); return; }
+    delete DB.customers[oldPhone]; DB.customers[phone]=c; c.phone=phone;
+    [DB.bookings,DB.checkins,DB.orders,DB.subscriptions||[]].forEach(arr=>arr.forEach(x=>{ if(x.customerPhone===oldPhone) x.customerPhone=phone; }));
+  }
+  c.name=name; c.address=addr; c.email=email;
+  [DB.bookings,DB.checkins,DB.subscriptions||[]].forEach(arr=>arr.forEach(x=>{ if(x.customerPhone===phone) x.customerName=name; }));
+  UI.modal=null; toast('تم تحديث بيانات العميل'); save();
+};
+const _rmE=renderModal;
+renderModal=function(){
+  const m=UI.modal;
+  if(m&&m.type==='editCustomer'){ const h=document.createElement('div'); document.body.appendChild(h); h.outerHTML=editCustomerModal(m); return; }
+  _rmE();
+};
+
+/* ============================================================
+   4) التقارير: فلترة بيوم / تاريخ محدد / فترة
+   ============================================================ */
+const ST_AR={Pending:'قيد الانتظار',Confirmed:'مؤكد','Checked-in':'في المكتبة',Completed:'مكتمل',Cancelled:'ملغى'};
+const paid=s=>s.paid!==undefined?Number(s.paid):Number(s.price||0);
+function inR(d,r){ if(!r) return true; if(!d) return false; if(r.from&&d<r.from) return false; if(r.to&&d>r.to) return false; return true; }
+function rpRange(){
+  const m=UI.rpMode||'all', t=lToday();
+  if(m==='today') return {from:t,to:t,label:ltr(t)};
+  if(m==='yesterday'){ const d=new Date(); d.setDate(d.getDate()-1); const y=lDate(d); return {from:y,to:y,label:ltr(y)}; }
+  if(m==='week'){ const f=lDate(startOfWeek(new Date())); return {from:f,to:t,label:'من '+ltr(f)+' إلى '+ltr(t)}; }
+  if(m==='month'){ const n=new Date(); const f=lDate(new Date(n.getFullYear(),n.getMonth(),1)); return {from:f,to:t,label:'من '+ltr(f)+' إلى '+ltr(t)}; }
+  if(m==='day'){ const d=UI.rpDay||t; return {from:d,to:d,label:ltr(d)}; }
+  if(m==='range'){
+    let f=UI.rpFrom||'', e=UI.rpTo||'';
+    if(f&&e&&f>e){ const x=f; f=e; e=x; }
+    if(!f&&!e) return null;
+    return {from:f,to:e,label:'من '+(f?ltr(f):'البداية')+' إلى '+(e?ltr(e):'اليوم')};
+  }
+  return null;
+}
+reportRows=function(){
+  const r=rpRange(), tab=UI.reportTab;
+  const ci=DB.checkins.filter(c=>inR(lDate(c.entryAt),r)).sort((a,b)=>new Date(b.entryAt)-new Date(a.entryAt));
+  const done=ci.filter(c=>c.status==='completed');
+  const orders=DB.orders.filter(o=>inR(lDate(o.createdAt),r));
+  const subs=(DB.subscriptions||[]).filter(s=>s.status!=='cancelled'&&inR(lDate(s.createdAt),r));
+  const seatCode=id=>{ const s=DB.seats.find(x=>x.id===id); return s?s.code:'—'; };
+  switch(tab){
+    case 'visitors':
+      return {head:['العميل','الجوال','وقت الدخول','وقت الخروج','المدة الفعلية (س)','المبلغ'],
+        rows:ci.map(c=>[c.customerName,c.customerPhone,fmtDT(c.entryAt),c.exitAt?fmtDT(c.exitAt):'داخل المكتبة',c.exitAt?(c.actualHours||0).toFixed(1):'—',c.status==='completed'?c.finalPrice:'—'])};
+    case 'bookings':{
+      const list=DB.bookings.filter(b=>inR(b.date,r)).sort((a,b)=>(b.date+(b.time||'')).localeCompare(a.date+(a.time||'')));
+      return {head:['العميل','الجوال','التاريخ','الوقت','المدة','السعر','الحالة'],
+        rows:list.map(b=>[b.customerName,b.customerPhone,fmtDate(b.date),b.time||'—',b.durationLabel,b.price,ST_AR[b.status]||b.status])};
+    }
+    case 'revenue':{
+      const rows=[];
+      DB.checkins.filter(c=>c.status==='completed'&&inR(lDate(c.exitAt),r)).forEach(c=>rows.push({t:c.exitAt,v:['حجز',c.customerName,c.finalPrice,fmtDT(c.exitAt)]}));
+      orders.forEach(o=>rows.push({t:o.createdAt,v:['منتجات',o.items.map(i=>i.name+'×'+i.qty).join('، ')||'—',o.total,fmtDT(o.createdAt)]}));
+      subs.forEach(s=>rows.push({t:s.createdAt,v:['اشتراك',s.customerName+' — '+s.packageName,paid(s),fmtDT(s.createdAt)]}));
+      rows.sort((a,b)=>new Date(b.t)-new Date(a.t));
+      return {head:['المصدر','الوصف','المبلغ','التاريخ'],rows:rows.map(x=>x.v)};
+    }
+    case 'products':{
+      const agg={};
+      orders.forEach(o=>o.items.forEach(i=>{ const a=agg[i.productId]||(agg[i.productId]={q:0,v:0}); a.q+=i.qty; a.v+=i.price*i.qty; }));
+      return {head:['المنتج','السعر','المخزون الحالي','المباع في الفترة','الإيراد قبل الخصم'],
+        rows:DB.products.map(p=>{ const a=agg[p.id]||{q:0,v:0}; return [p.name,p.price,p.stock,a.q,a.v]; }).sort((x,y)=>y[3]-x[3])};
+    }
+    case 'customers':{
+      const head=['الاسم','الجوال','السكن','الزيارات','الساعات','الإنفاق'];
+      if(!r) return {head,rows:Object.values(DB.customers).sort((a,b)=>b.totalSpent-a.totalSpent).map(c=>[c.name,c.phone,c.address||'—',c.visits,Math.round(c.totalHours),c.totalSpent])};
+      const g={}, get=ph=>g[ph]||(g[ph]={v:0,h:0,s:0});
+      done.forEach(c=>{ const a=get(c.customerPhone); a.v++; a.h+=c.actualHours||0; a.s+=c.finalPrice||0; });
+      orders.forEach(o=>{ if(o.customerPhone) get(o.customerPhone).s+=o.total; });
+      subs.forEach(s=>{ get(s.customerPhone).s+=paid(s); });
+      return {head,rows:Object.keys(g).map(ph=>{ const c=DB.customers[ph]||{}, a=g[ph]; return [c.name||ph,ph,c.address||'—',a.v,Math.round(a.h*10)/10,a.s]; }).sort((x,y)=>y[5]-x[5])};
+    }
+    case 'usage':
+      return {head:['العميل','التاريخ','المقعد','المدة الفعلية (س)'],
+        rows:done.map(c=>[c.customerName,fmtDate(c.entryAt),seatCode(c.seatId),(c.actualHours||0).toFixed(1)])};
+    case 'occupancy':
+      return {head:['المقعد','عدد الاستخدامات','إجمالي الساعات','الحالة الحالية'],
+        rows:DB.seats.map(s=>{ const u=ci.filter(c=>c.seatId===s.id); const h=u.reduce((a,c)=>a+(c.actualHours||0),0); return [s.code,u.length,h.toFixed(1),seatLabel(seatStatusNow(s.id))]; })};
+  }
+  return {head:[],rows:[]};
+};
+pgReports=function(){
+  const tabs=[['visitors','الزوار'],['bookings','الحجوزات'],['revenue','الإيرادات'],['products','المنتجات'],['customers','العملاء'],['usage','ساعات الاستخدام'],['occupancy','إشغال المقاعد']];
+  const modes=[['all','الكل'],['today','اليوم'],['yesterday','أمس'],['week','هذا الأسبوع'],['month','هذا الشهر'],['day','يوم محدد'],['range','فترة محددة']];
+  const mode=UI.rpMode||'all', t=lToday(), r=rpRange(), data=reportRows();
+  const total=UI.reportTab==='revenue'?data.rows.reduce((s,x)=>s+(Number(x[2])||0),0):null;
+  return `<div class="panel">
+  <div class="tab-row">${tabs.map(x=>`<div class="tab-btn ${UI.reportTab===x[0]?'on':''}" onclick="App.setReportTab('${x[0]}')">${x[1]}</div>`).join('')}</div>
+  <div class="toolbar">
+    <div class="chip-filter">${modes.map(x=>`<span class="chip ${mode===x[0]?'on':''}" onclick="App.setRpMode('${x[0]}')">${x[1]}</span>`).join('')}</div>
+    ${mode==='day'?`<input type="date" class="input-dark" value="${UI.rpDay||t}" onchange="App.setRpDay(this.value)">`:''}
+    ${mode==='range'?`<span style="font-size:13px;color:var(--ink-soft);">من</span><input type="date" class="input-dark" value="${UI.rpFrom||''}" onchange="App.setRpFrom(this.value)"><span style="font-size:13px;color:var(--ink-soft);">إلى</span><input type="date" class="input-dark" value="${UI.rpTo||''}" onchange="App.setRpTo(this.value)">`:''}
+  </div>
+  <div class="panel-h"><span class="sub">${r?('الفترة: '+r.label):'كل الفترات'} · ${data.rows.length} سجل${total!==null?(' · إجمالي الإيرادات: '+fmtMoney(total)):''}</span><button class="btn btn-brass btn-sm" onclick="App.exportReport()">⬇ تصدير CSV</button></div>
+  <div id="reportTableHolder">${reportTableHTML()}</div>
+  </div>`;
+};
+App.setRpMode=(m)=>{ UI.rpMode=m; if(m==='day'&&!UI.rpDay) UI.rpDay=lToday(); render(); };
+App.setRpDay=(v)=>{ UI.rpDay=v; render(); };
+App.setRpFrom=(v)=>{ UI.rpFrom=v; render(); };
+App.setRpTo=(v)=>{ UI.rpTo=v; render(); };
+App.exportReport=()=>{
+  const {head,rows}=reportRows(), r=rpRange();
+  const clean=s=>String(s==null?'':s).replace(/[\u2066\u2069]/g,'');
+  const csv='\uFEFF'+head.join(',')+'\n'+rows.map(x=>x.map(c=>`"${clean(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  const a=document.createElement('a'); a.href=url;
+  a.download='تقرير-'+UI.reportTab+'-'+(r?((r.from||'start')+'_'+(r.to||'now')):'all')+'.csv';
+  a.click(); URL.revokeObjectURL(url);
+};
+})();
+</script>
 </body>
 </html>
