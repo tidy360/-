@@ -2535,5 +2535,745 @@ renderModal=function(){
 };
 })();
 </script>
+  <script>
+/* ============================================================
+   وحدة الكورسات (Courses Management)
+   لا تعدّل أي ميزة موجودة؛ تضيف صفحة "الكورسات" في القائمة فقط.
+   ============================================================ */
+(function(){
+const ST='width:100%;padding:10px;border-radius:8px;', LB='color:#B7BAC4;';
+const LRI='\u2066', PDI='\u2069', ltr=s=>LRI+s+PDI;
+const p2=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const today=()=>ymd(new Date());
+const pd=s=>{const a=s.split('-').map(Number);return new Date(a[0],a[1]-1,a[2]);};
+const addDays=(s,n)=>{const d=pd(s);d.setDate(d.getDate()+n);return ymd(d);};
+const fD=s=>s?ltr(s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4)):'—';
+const DAYS=['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+const WEEK=[6,0,1,2,3,4,5];
+const MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+const tm=t=>{const a=String(t||'0:0').split(':').map(Number);return a[0]*60+(a[1]||0);};
+const toHM=m=>p2(Math.floor(m/60))+':'+p2(m%60);
+const money=n=>fmtMoney(Number(n)||0);
+const num=v=>{const x=parseFloat(v);return isNaN(x)?0:x;};
+const r2=n=>Math.round(n*100)/100;
+const $=id=>document.getElementById(id);
+const val=id=>{const e=$(id);return e?String(e.value).trim():'';};
+const nowISO=()=>new Date().toISOString();
+const who=()=>{const s=currentStaff();return s?s.name:'';};
+const isAdmin=()=>{const s=currentStaff();return !!s&&s.role==='Admin';};
+const METHODS=['نقداً','بنكك (Bankak)','تحويل بنكي','أخرى'];
+const REASONS=['مرض المعلم','ظرف طارئ للمعلم','عطلة رسمية','طلب من الطلاب','تعارض في الجدول','أخرى'];
+const SS={scheduled:['مجدولة','badge-blue'],completed:['مكتملة','badge-green'],postponed:['مؤجلة','badge-amber'],cancelled:['ملغاة','badge-red']};
+const CS={active:['نشط','badge-green'],completed:['مكتمل','badge-gray'],paused:['متوقف','badge-amber'],cancelled:['ملغى','badge-red']};
+const PS={paid:['مدفوع','badge-green'],partial:['مدفوع جزئياً','badge-amber'],unpaid:['غير مدفوع','badge-red']};
+const ENS={active:'نشط',removed:'مُزال',transferred:'محوّل'};
+const bdg=(m,k)=>'<span class="badge '+((m[k]||['',''])[1])+'">'+((m[k]||[k])[0])+'</span>';
+
+/* ---------------- البيانات ---------------- */
+function init(){
+  if(!DB.cm) DB.cm={};
+  const d={teachers:[],courses:[],students:[],enrolls:[],sessions:[],att:[],tPays:[],sPays:[],exps:[],logs:[],rooms:['قاعة 1','قاعة 2','قاعة 3']};
+  for(const k in d) if(!DB.cm[k]) DB.cm[k]=d[k];
+}
+function C(){ if(!DB.cm||!DB.cm.rooms) init(); return DB.cm; }
+const _es=ensureShape; ensureShape=function(){ _es(); init(); };
+if(DB) init();
+const byId=(a,id)=>a.find(x=>x.id===id);
+const teacher=id=>byId(C().teachers,id), course=id=>byId(C().courses,id), student=id=>byId(C().students,id);
+const sHours=(a,b)=>r2((tm(b)-tm(a))/60);
+function S(){ return UI.cm||(UI.cm={tab:'dash',cid:null,sub:'students',view:'week',date:today(),fCourse:'',fTeacher:'',cstat:'all',q:'',sq:'',rep:{type:'coursePerf',param:'',from:'',to:''}}); }
+
+/* ---------------- حسابات ---------------- */
+const enrollsOf=(cid,all)=>C().enrolls.filter(e=>e.courseId===cid&&(all||e.status==='active'));
+const paidOfEn=eid=>r2(C().sPays.filter(p=>p.enrollId===eid).reduce((s,p)=>s+p.amount,0));
+function enPay(e){ const p=paidOfEn(e.id); return p<=0?'unpaid':p>=e.fee?'paid':'partial'; }
+const sessEarn=s=>s.status==='completed'?r2(s.hours*(s.rate||0)):0;
+function tStats(tid){
+  const done=C().sessions.filter(s=>s.status==='completed'&&s.teacherId===tid);
+  const hours=r2(done.reduce((a,s)=>a+s.hours,0)), earned=r2(done.reduce((a,s)=>a+sessEarn(s),0));
+  const paid=r2(C().tPays.filter(p=>p.teacherId===tid).reduce((a,p)=>a+p.amount,0));
+  return {hours,earned,paid,bal:r2(earned-paid),courses:C().courses.filter(c=>c.teacherId===tid).length};
+}
+function attPct(eid){
+  const recs=C().att.filter(a=>a.enrollId===eid);
+  const c={present:0,absent:0,excused:0}; recs.forEach(a=>{ if(c[a.status]!==undefined) c[a.status]++; });
+  const tot=recs.length; return {present:c.present,absent:c.absent,excused:c.excused,total:tot,pct:tot?Math.round(c.present/tot*100):null};
+}
+function cStats(cid){
+  const en=enrollsOf(cid,true), act=en.filter(e=>e.status==='active');
+  const expected=r2(act.reduce((a,e)=>a+e.fee,0));
+  const collected=r2(en.reduce((a,e)=>a+paidOfEn(e.id),0));
+  const outstanding=r2(act.reduce((a,e)=>a+Math.max(0,e.fee-paidOfEn(e.id)),0));
+  const done=C().sessions.filter(s=>s.courseId===cid&&s.status==='completed');
+  const hours=r2(done.reduce((a,s)=>a+s.hours,0)), earned=r2(done.reduce((a,s)=>a+sessEarn(s),0));
+  const byT={}; done.forEach(s=>{ byT[s.teacherId]=(byT[s.teacherId]||0)+sessEarn(s); });
+  let tpaid=0; Object.keys(byT).forEach(t=>{ const ts=tStats(t); if(ts.earned>0) tpaid+=byT[t]*Math.min(ts.paid,ts.earned)/ts.earned; });
+  tpaid=r2(tpaid);
+  const exp=r2(C().exps.filter(x=>x.courseId===cid).reduce((a,x)=>a+x.amount,0));
+  const ss=C().sessions.filter(s=>s.courseId===cid); const cnt=k=>ss.filter(s=>s.status===k).length;
+  return {students:act.length,expected,collected,outstanding,hours,earned,tpaid,liab:r2(earned-tpaid),exp,net:r2(collected-tpaid-exp),accNet:r2(collected-earned-exp),
+    scheduled:cnt('scheduled'),completed:cnt('completed'),postponed:cnt('postponed'),cancelled:cnt('cancelled')};
+}
+function conflicts(c,date,start,end,ignoreId,room){
+  const out=[], a=tm(start), b=tm(end);
+  C().sessions.forEach(s=>{
+    if(s.id===ignoreId||['scheduled','completed'].indexOf(s.status)<0||s.date!==date) return;
+    if(!(a<tm(s.end)&&tm(s.start)<b)) return;
+    const sc=course(s.courseId);
+    if(sc&&c&&c.teacherId&&sc.teacherId===c.teacherId) out.push('المعلم لديه حصة «'+sc.name+'» في نفس الوقت');
+    if(room&&s.room===room) out.push('القاعة «'+room+'» محجوزة لحصة «'+(sc?sc.name:'')+'» في نفس الوقت');
+  });
+  return out;
+}
+function tx(fn){ const snap=JSON.stringify(C()); try{ fn(); return true; }catch(e){ DB.cm=JSON.parse(snap); toast(e.message||'تعذر تنفيذ العملية','err'); return false; } }
+const fail=m=>{ throw new Error(m); };
+function done(msg){ UI.modal=null; if(msg) toast(msg); save(); }
+function dupPay(arr,key,p){ return arr.some(x=>x[key]===p[key]&&x.amount===p.amount&&x.date===p.date&&x.method===p.method&&(Date.now()-new Date(x.createdAt).getTime())<30000); }
+
+/* ---------------- مساعدات واجهة ---------------- */
+const fld=(l,h)=>'<div class="form-row"><label style="'+LB+'">'+l+'</label>'+h+'</div>';
+const inp=(id,v,x)=>'<input class="input-dark" style="'+ST+'" id="'+id+'" value="'+esc(v==null?'':v)+'" '+(x||'')+'>';
+const sel=(id,opts,cur,x)=>'<select class="input-dark" style="'+ST+'" id="'+id+'" '+(x||'')+'>'+opts.map(o=>'<option value="'+esc(o[0])+'" '+(String(o[0])===String(cur)?'selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select>';
+const g2=(a,b)=>'<div class="form-grid2">'+a+b+'</div>';
+const mdl=(t,b,w)=>'<div class="modal-bg"><div class="modal" style="max-width:'+(w||520)+'px;"><h3>'+t+'</h3>'+b+'</div></div>';
+const okc=(ok,fn)=>'<div style="display:flex;gap:10px;margin-top:10px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="'+fn+'">'+ok+'</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div>';
+const closeB='<button class="btn btn-ghost-dark" style="width:100%;justify-content:center;margin-top:10px;" onclick="App.closeModal()">إغلاق</button>';
+const openM=m=>{ UI.modal=m; render(); };
+const ask=(t,x,l,code)=>openM({type:'confirm',title:t,text:x,confirmLabel:l,onConfirm:'()=>{'+code+'}'});
+const empty=t=>'<div class="empty">'+t+'</div>';
+const tbl=(head,rows,foot)=>'<div class="scrollx"><table><thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+head.length+'" class="empty">لا توجد بيانات</td></tr>')+'</tbody>'+(foot?'<tfoot><tr>'+foot.map(c=>'<td style="font-weight:700;">'+c+'</td>').join('')+'</tr></tfoot>':'')+'</table></div>';
+const cOpts=(all,cur)=>[['',all||'— اختر —']].concat(C().courses.filter(c=>!c.archived||c.id===cur).map(c=>[c.id,c.name]));
+const tOpts=all=>[['',all||'— اختر —']].concat(C().teachers.map(t=>[t.id,t.name]));
+const stName=e=>{const s=student(e.studentId);return s?s.name:'—';};
+const stPhone=e=>{const s=student(e.studentId);return s?s.phone:'';};
+
+const CM=window.CM={};
+const _rnd=render;
+render=function(){ _rnd(); try{ if(UI.site==='admin'&&UI.adminAuthed&&UI.adminPage==='courses'&&S().tab==='reports'&&$('rp_out')) CM.repChange(true,true); }catch(e){ console.warn(e); } };
+const MODALS={};
+const _rm=renderModal;
+renderModal=function(){
+  const m=UI.modal;
+  if(m&&m.type&&m.type.indexOf('cm_')===0&&MODALS[m.type]){ const h=document.createElement('div'); document.body.appendChild(h); h.outerHTML=MODALS[m.type](m); return; }
+  _rm();
+};
+NAV.splice(Math.max(0,NAV.findIndex(n=>n.id==='expenses')),0,{id:'courses',label:'الكورسات',ic:'🎓',roles:['Admin','Manager']});
+const _rap=renderAdminPage;
+renderAdminPage=function(staff){ return UI.adminPage==='courses'?pgCourses():_rap(staff); };
+
+/* ---------------- الصفحة الرئيسية للوحدة ---------------- */
+function pgCourses(){
+  const s=S();
+  const tabs=[['dash','لوحة الكورسات'],['courses','الكورسات'],['students','الطلاب'],['teachers','المعلمون'],['schedule','الجدول'],['finance','المالية'],['reports','التقارير']];
+  let body='';
+  if(s.tab==='dash') body=vDash(); else if(s.tab==='courses') body=s.cid&&course(s.cid)?vCourse(s.cid):vCourses();
+  else if(s.tab==='students') body=vStudents(); else if(s.tab==='teachers') body=vTeachers();
+  else if(s.tab==='schedule') body=vSchedule(); else if(s.tab==='finance') body=vFinance(); else body=vReports();
+  return '<div class="tab-row">'+tabs.map(t=>'<div class="tab-btn '+(s.tab===t[0]?'on':'')+'" onclick="CM.go(\''+t[0]+'\')">'+t[1]+'</div>').join('')+'</div>'+body;
+}
+CM.go=t=>{ const s=S(); s.tab=t; s.cid=null; render(); };
+
+/* ---------------- لوحة الكورسات ---------------- */
+function vDash(){
+  const c=C(), t=today();
+  const act=c.courses.filter(x=>x.status==='active'&&!x.archived);
+  const studs=new Set(c.enrolls.filter(e=>e.status==='active').map(e=>e.studentId)).size;
+  const sched=c.sessions.filter(s=>s.status==='scheduled');
+  const todayS=c.sessions.filter(s=>s.date===t&&(s.status==='scheduled'||s.status==='completed')).sort((a,b)=>a.start.localeCompare(b.start));
+  const rev=r2(c.sPays.reduce((a,p)=>a+p.amount,0)), tp=r2(c.tPays.reduce((a,p)=>a+p.amount,0));
+  const outT=r2(c.teachers.reduce((a,x)=>a+Math.max(0,tStats(x.id).bal),0));
+  const upcoming=sched.filter(s=>s.date>=t).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start)).slice(0,8);
+  const recent=c.sessions.filter(s=>s.status==='completed').sort((a,b)=>(b.completedAt||'').localeCompare(a.completedAt||'')).slice(0,8);
+  const row=s=>{const cc=course(s.courseId)||{},tt=teacher(cc.teacherId)||{};return [fD(s.date),esc(cc.name||'—'),esc(tt.name||'—'),'<span class="num">'+s.start+' – '+s.end+'</span>',esc(s.room||'—'),'<a class="btn btn-ghost-dark btn-sm" onclick="CM.openSess(\''+s.id+'\')">فتح</a>'];};
+  const H=['التاريخ','الكورس','المعلم','الوقت','القاعة',''];
+  const al=[];
+  if(todayS.length) al.push(['📅','لديك '+todayS.length+' حصة اليوم']);
+  const pend=c.sessions.filter(s=>s.status==='postponed'&&(byId(c.sessions,s.movedTo)||{}).status==='scheduled');
+  if(pend.length) al.push(['↻',pend.length+' حصة مؤجلة بانتظار موعدها الجديد']);
+  const soon=upcoming.filter(s=>s.date<=addDays(t,2)&&s.date>t);
+  if(soon.length) al.push(['⏰',soon.length+' حصة خلال اليومين القادمين']);
+  const unp=c.enrolls.filter(e=>e.status==='active'&&e.fee-paidOfEn(e.id)>0);
+  if(unp.length) al.push(['💳',unp.length+' طالب عليهم رسوم غير مسددة بإجمالي '+money(unp.reduce((a,e)=>a+e.fee-paidOfEn(e.id),0))]);
+  const tw=c.teachers.filter(x=>tStats(x.id).bal>0);
+  if(tw.length) al.push(['👨‍🏫',tw.length+' معلم لديهم مستحقات غير مدفوعة بإجمالي '+money(outT)]);
+  const ending=c.courses.filter(x=>x.status==='active'&&!x.archived&&x.endDate&&x.endDate<=addDays(t,14));
+  ending.forEach(x=>al.push(['🏁','الكورس «'+esc(x.name)+'» '+(x.endDate<t?'تجاوز تاريخ نهايته ('+fD(x.endDate)+')':'ينتهي في '+fD(x.endDate))]));
+  return '<div class="kpi-grid">'+kpi('الكورسات النشطة',act.length)+kpi('الطلاب المسجلون',studs)+kpi('المعلمون',c.teachers.length)+kpi('الحصص المجدولة',sched.length)+kpi('حصص اليوم',todayS.length)+kpi('إيرادات الكورسات',money(rev))+kpi('مدفوعات المعلمين',money(tp))+kpi('مستحقات معلمين غير مدفوعة',money(outT))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>تنبيهات</h3></div>'+(al.length?al.map(a=>'<div class="notif-item"><div class="ic">'+a[0]+'</div><div><div class="t">'+a[1]+'</div></div></div>').join(''):empty('لا توجد تنبيهات'))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>حصص اليوم</h3></div>'+tbl(H,todayS.map(row))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>الحصص القادمة</h3></div>'+tbl(H,upcoming.map(row))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>حصص اكتملت مؤخراً</h3></div>'+tbl(H.slice(0,5).concat(['الساعات','']),recent.map(s=>{const r=row(s);r.splice(5,0,'<span class="num">'+s.hours+'</span>');return r;}))+'</div>';
+}
+
+/* ---------------- قائمة الكورسات ---------------- */
+function courseListHTML(){
+  const s=S(), q=(s.q||'').toLowerCase();
+  const list=C().courses.filter(c=>{
+    if(s.cstat==='archived') return c.archived;
+    if(c.archived) return false;
+    return s.cstat==='all'||c.status===s.cstat;
+  }).filter(c=>!q||(c.name+' '+(c.subject||'')+' '+((teacher(c.teacherId)||{}).name||'')).toLowerCase().indexOf(q)>=0);
+  return tbl(['الكورس','المادة','المعلم','الطلاب','السعر للطالب','الفترة','الحالة','المحصّل / المتوقع',''],list.map(c=>{
+    const k=cStats(c.id), t=teacher(c.teacherId)||{};
+    return ['<b>'+esc(c.name)+'</b>',esc(c.subject||'—'),esc(t.name||'—'),'<span class="num">'+k.students+'</span>','<span class="num">'+money(c.price)+'</span>',fD(c.startDate)+' → '+fD(c.endDate),bdg(CS,c.status)+(c.archived?' <span class="badge badge-gray">مؤرشف</span>':''),'<span class="num">'+money(k.collected)+' / '+money(k.expected)+'</span>','<a class="btn btn-brass btn-sm" onclick="CM.openCourse(\''+c.id+'\')">فتح</a>'];
+  }));
+}
+function vCourses(){
+  const s=S(), ch=[['all','الكل'],['active','نشط'],['paused','متوقف'],['completed','مكتمل'],['cancelled','ملغى'],['archived','مؤرشف']];
+  return '<div class="panel"><div class="toolbar"><input class="input-dark" placeholder="بحث باسم الكورس أو المادة أو المعلم…" value="'+esc(s.q||'')+'" oninput="CM.cSearch(this.value)">'
+  +'<div class="chip-filter">'+ch.map(x=>'<span class="chip '+(s.cstat===x[0]?'on':'')+'" onclick="CM.cStat(\''+x[0]+'\')">'+x[1]+'</span>').join('')+'</div>'
+  +'<button class="btn btn-brass btn-sm" style="margin-right:auto;" onclick="CM.openCourseForm()">+ كورس جديد</button></div><div id="cm_clist">'+courseListHTML()+'</div></div>';
+}
+CM.cSearch=v=>{ S().q=v; const e=$('cm_clist'); if(e) e.innerHTML=courseListHTML(); };
+CM.cStat=v=>{ S().cstat=v; render(); };
+CM.openCourse=id=>{ const s=S(); s.tab='courses'; s.cid=id; s.sub='students'; render(); window.scrollTo(0,0); };
+CM.back=()=>{ S().cid=null; render(); };
+CM.sub=x=>{ S().sub=x; render(); };
+
+/* ---------------- تفاصيل الكورس ---------------- */
+function vCourse(cid){
+  const c=course(cid), k=cStats(cid), t=teacher(c.teacherId)||{}, s=S();
+  const subs=[['students','الطلاب'],['sessions','الحصص'],['attendance','الحضور'],['finance','المالية']];
+  let body='';
+  if(s.sub==='students') body=cStudents(c); else if(s.sub==='sessions') body=cSessions(c); else if(s.sub==='attendance') body=cAttendance(c); else body=cFinance(c,k);
+  return '<div class="panel"><div class="panel-h"><div><a class="btn btn-ghost-dark btn-sm" onclick="CM.back()">→ رجوع</a> <h3 style="display:inline;margin-right:10px;">'+esc(c.name)+'</h3> '+bdg(CS,c.status)+(c.archived?' <span class="badge badge-gray">مؤرشف</span>':'')+'</div>'
+  +'<div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-ghost-dark btn-sm" onclick="CM.openCourseForm(\''+cid+'\')">✎ تعديل</button>'
+  +(c.status==='paused'?'<button class="btn btn-ghost-dark btn-sm" onclick="CM.setStatus(\''+cid+'\',\'active\')">استئناف</button>':c.status==='active'?'<button class="btn btn-ghost-dark btn-sm" onclick="CM.askStatus(\''+cid+'\',\'paused\')">إيقاف مؤقت</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.askStatus(\''+cid+'\',\'completed\')">إنهاء الكورس</button>':'')
+  +'<button class="btn btn-ghost-dark btn-sm" onclick="CM.askArchive(\''+cid+'\')">'+(c.archived?'استعادة':'أرشفة')+'</button>'
+  +(isAdmin()?'<button class="btn btn-danger btn-sm" onclick="CM.askDelCourse(\''+cid+'\')">حذف</button>':'')+'</div></div>'
+  +'<div style="font-size:13px;color:var(--ink-soft);line-height:1.9;">المادة: '+esc(c.subject||'—')+' · المعلم: '+esc(t.name||'—')+' ('+esc(t.phone||'')+') · '+c.perWeek+' حصة أسبوعياً × '+c.classHours+' ساعة · أجر الساعة: '+money(c.rate)+' · المدة: '+durTxt(c.startDate,c.endDate)+(c.desc?'<br>'+esc(c.desc):'')+'</div></div>'
+  +'<div class="kpi-grid">'+kpi('الطلاب',k.students)+kpi('المتوقع',money(k.expected))+kpi('المحصّل',money(k.collected))+kpi('المتبقي على الطلاب',money(k.outstanding))+kpi('ساعات منفذة',k.hours)+kpi('مستحقات المعلم',money(k.earned))+kpi('صافي الربح',money(k.net))+'</div>'
+  +'<div class="tab-row">'+subs.map(x=>'<div class="tab-btn '+(s.sub===x[0]?'on':'')+'" onclick="CM.sub(\''+x[0]+'\')">'+x[1]+'</div>').join('')+'</div>'+body;
+}
+function durTxt(a,b){ if(!a||!b) return '—'; const d=Math.round((pd(b)-pd(a))/86400000)+1; return d+' يوم (~'+Math.ceil(d/7)+' أسبوع)'; }
+CM.setStatus=(id,st)=>{ const c=course(id); if(!c) return; c.status=st; toast('تم تحديث الحالة'); save(); };
+CM.askStatus=(id,st)=>ask(st==='paused'?'إيقاف الكورس مؤقتاً':'إنهاء الكورس','هل أنت متأكد؟','تأكيد',"CM.setStatus('"+id+"','"+st+"')");
+CM.askArchive=id=>{ const c=course(id); ask(c.archived?'استعادة الكورس':'أرشفة الكورس',c.archived?'سيعود الكورس للقائمة.':'سيختفي الكورس من القائمة الرئيسية وتبقى بياناته محفوظة.','تأكيد',"CM.doArchive('"+id+"')"); };
+CM.doArchive=id=>{ const c=course(id); if(c){ c.archived=!c.archived; S().cid=null; save(); } };
+CM.askDelCourse=id=>ask('حذف الكورس','سيتم حذف الكورس وطلابه وحصصه نهائياً. لا يمكن حذف كورس له حصص مكتملة أو مدفوعات (استخدم الأرشفة).','حذف',"CM.delCourse('"+id+"')");
+CM.delCourse=id=>{
+  const c=C(), sess=c.sessions.filter(s=>s.courseId===id), en=enrollsOf(id,true).map(e=>e.id);
+  if(sess.some(s=>s.status==='completed')||c.sPays.some(p=>en.indexOf(p.enrollId)>=0)){ toast('لا يمكن حذف كورس له حصص مكتملة أو مدفوعات — استخدم الأرشفة','err'); return; }
+  tx(()=>{ const sid=sess.map(s=>s.id);
+    c.att=c.att.filter(a=>sid.indexOf(a.sessionId)<0); c.logs=c.logs.filter(l=>sid.indexOf(l.sessionId)<0);
+    c.sessions=c.sessions.filter(s=>s.courseId!==id); c.enrolls=c.enrolls.filter(e=>e.courseId!==id);
+    c.exps=c.exps.filter(x=>x.courseId!==id); c.courses=c.courses.filter(x=>x.id!==id); S().cid=null; });
+  toast('تم حذف الكورس'); save();
+};
+
+function cStudents(c){
+  const list=enrollsOf(c.id,true);
+  return '<div class="panel"><div class="panel-h"><h3>طلاب الكورس</h3><button class="btn btn-brass btn-sm" onclick="CM.openAddStudents(\''+c.id+'\')">+ إضافة طلاب</button></div>'
+  +tbl(['الطالب','الجوال','تاريخ التسجيل','الرسوم','المدفوع','المتبقي','الدفع','الحضور','الحالة',''],list.map(e=>{
+    const p=paidOfEn(e.id), a=attPct(e.id), act=e.status==='active';
+    return [esc(stName(e)),'<span class="num">'+esc(stPhone(e))+'</span>',fD(e.regDate),'<span class="num">'+money(e.fee)+'</span>','<span class="num">'+money(p)+'</span>','<span class="num">'+money(Math.max(0,e.fee-p))+'</span>',act?bdg(PS,enPay(e)):'—',a.pct===null?'—':a.pct+'%',act?'<span class="badge badge-green">نشط</span>':'<span class="badge badge-gray">'+ENS[e.status]+'</span>',
+      '<div style="display:flex;gap:5px;">'+(act?'<button class="btn btn-brass btn-sm" onclick="CM.openSPay(\''+e.id+'\')">دفعة</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.openTransfer(\''+e.id+'\')">نقل</button><button class="btn btn-danger btn-sm" onclick="CM.askRemove(\''+e.id+'\')">إزالة</button>':'')+'<button class="btn btn-ghost-dark btn-sm" onclick="CM.openStudent(\''+e.studentId+'\')">تفاصيل</button></div>'];
+  }))+'</div>';
+}
+function cSessions(c){
+  const list=C().sessions.filter(s=>s.courseId===c.id).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start));
+  return '<div class="panel"><div class="panel-h"><h3>حصص الكورس ('+list.length+')</h3><div style="display:flex;gap:6px;"><button class="btn btn-brass btn-sm" onclick="CM.openSched(\''+c.id+'\',\'rec\')">+ جدولة متكررة</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.openSched(\''+c.id+'\',\'one\')">+ حصة منفردة</button></div></div>'
+  +tbl(['التاريخ','اليوم','الوقت','الساعات','القاعة','الحالة','ملاحظة',''],list.map(s=>[fD(s.date),DAYS[pd(s.date).getDay()],'<span class="num">'+s.start+' – '+s.end+'</span>',s.hours,esc(s.room||'—'),bdg(SS,s.status),s.rescheduledFrom?'معاد جدولتها من '+fD(s.origDate):(s.status==='postponed'?esc(s.reason||''):(s.status==='cancelled'?esc(s.reason||''):'')),'<a class="btn btn-ghost-dark btn-sm" onclick="CM.openSess(\''+s.id+'\')">فتح</a>']))+'</div>';
+}
+function cAttendance(c){
+  const en=enrollsOf(c.id,true), done=C().sessions.filter(s=>s.courseId===c.id&&s.status==='completed').sort((a,b)=>a.date.localeCompare(b.date));
+  const L={present:'ح',absent:'غ',excused:'ع'}, col={present:'#7fbf9c',absent:'#e08a7c',excused:'#E2C892'};
+  const m=tbl(['الطالب'].concat(done.map(s=>'<span class="num">'+fD(s.date).slice(1,6)+'</span>')),en.map(e=>[esc(stName(e))].concat(done.map(s=>{const r=C().att.find(a=>a.sessionId===s.id&&a.enrollId===e.id);return r?'<b style="color:'+col[r.status]+';">'+L[r.status]+'</b>':'·';}))));
+  return '<div class="panel"><div class="panel-h"><h3>ملخص الحضور</h3><span class="sub">ح = حاضر · غ = غائب · ع = بعذر</span></div>'
+  +tbl(['الطالب','حاضر','غائب','بعذر','نسبة الحضور'],en.map(e=>{const a=attPct(e.id);return [esc(stName(e)),a.present,a.absent,a.excused,a.pct===null?'—':'<b>'+a.pct+'%</b>'];}))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>سجل الحضور بالحصص المكتملة</h3></div>'+m+'</div>';
+}
+function cFinance(c,k){
+  const en=enrollsOf(c.id,true).map(e=>e.id);
+  const pays=C().sPays.filter(p=>en.indexOf(p.enrollId)>=0).sort((a,b)=>b.date.localeCompare(a.date));
+  const exps=C().exps.filter(x=>x.courseId===c.id).sort((a,b)=>b.date.localeCompare(a.date));
+  return '<div class="kpi-grid">'+kpi('الإيراد المتوقع',money(k.expected))+kpi('المحصّل فعلياً',money(k.collected))+kpi('المتبقي على الطلاب',money(k.outstanding))+kpi('مستحقات المعلم (مستحقة)',money(k.earned))+kpi('المدفوع للمعلم (نقدي)',money(k.tpaid))+kpi('التزامات متبقية للمعلم',money(k.liab))+kpi('مصروفات أخرى',money(k.exp))+kpi('صافي الربح (نقدي)',money(k.net))+kpi('صافي بعد المستحقات',money(k.accNet))+'</div>'
+  +'<div class="panel"><div class="sub" style="font-size:12.5px;color:var(--ink-soft);line-height:1.8;">صافي الربح = المحصّل − المدفوع فعلياً للمعلم − المصروفات. «صافي بعد المستحقات» يخصم كامل مستحقات المعلم (المدفوعة وغير المدفوعة). مدفوعات المعلم تُوزَّع على كورساته بنسبة مستحقاته.</div></div>'
+  +'<div class="panel"><div class="panel-h"><h3>مدفوعات الطلاب</h3></div>'+tbl(['التاريخ','الطالب','المبلغ','الطريقة','ملاحظات','بواسطة',''],pays.map(p=>{const e=byId(C().enrolls,p.enrollId);return [fD(p.date),esc(e?stName(e):'—'),'<span class="num">'+money(p.amount)+'</span>',esc(p.method||''),esc(p.notes||''),esc(p.by||''),isAdmin()?'<button class="btn btn-danger btn-sm" onclick="CM.askDelSPay(\''+p.id+'\')">حذف</button>':''];}))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>مصروفات الكورس الأخرى</h3><button class="btn btn-brass btn-sm" onclick="CM.openExp(\''+c.id+'\')">+ إضافة مصروف</button></div>'+tbl(['التاريخ','البند','المبلغ','ملاحظات',''],exps.map(x=>[fD(x.date),esc(x.title),'<span class="num">'+money(x.amount)+'</span>',esc(x.notes||''),'<button class="btn btn-danger btn-sm" onclick="CM.askDelExp(\''+x.id+'\')">حذف</button>']))+'</div>';
+}
+
+/* ---------------- نموذج الكورس ---------------- */
+MODALS.cm_course=function(m){
+  const c=m.cid?course(m.cid):null, T=C().teachers;
+  const tsel=sel('cf_teacher',T.map(t=>[t.id,t.name+' — '+t.phone]).concat([['__new','+ معلم جديد']]),c?c.teacherId:(T[0]?T[0].id:'__new'),'onchange="CM.cfTeacher()"');
+  const showNew=(!c&&!T.length);
+  return mdl(c?'تعديل الكورس':'كورس جديد',
+   g2(fld('اسم الكورس',inp('cf_name',c&&c.name)),fld('المادة',inp('cf_subject',c&&c.subject)))
+  +fld('المعلم',tsel)
+  +'<div id="cf_newt" style="display:'+(showNew?'block':'none')+';">'+g2(fld('اسم المعلم',inp('cf_tname','')),fld('جوال المعلم',inp('cf_tphone','')))+'</div>'
+  +g2(fld('سعر الكورس للطالب ('+DB.settings.currency+')',inp('cf_price',c?c.price:'','type="number" min="0"')),fld('أجر ساعة المعلم لهذا الكورس',inp('cf_rate',c?c.rate:(T[0]?T[0].rate:''),'type="number" min="0"')))
+  +g2(fld('تاريخ البداية',inp('cf_start',c?c.startDate:today(),'type="date" oninput="CM.cfDur()"')),fld('تاريخ النهاية',inp('cf_end',c?c.endDate:'','type="date" oninput="CM.cfDur()"')))
+  +'<div id="cf_dur" style="font-size:12px;color:var(--ink-soft);margin:-6px 0 10px;">'+(c?durTxt(c.startDate,c.endDate):'')+'</div>'
+  +g2(fld('عدد الحصص أسبوعياً',inp('cf_pw',c?c.perWeek:2,'type="number" min="1"')),fld('مدة الحصة (ساعات)',inp('cf_hrs',c?c.classHours:1.5,'type="number" min="0.25" step="0.25"')))
+  +fld('الحالة',sel('cf_status',[['active','نشط'],['paused','متوقف'],['completed','مكتمل'],['cancelled','ملغى']],c?c.status:'active'))
+  +fld('وصف الكورس','<textarea class="input-dark" style="'+ST+'" id="cf_desc" rows="2">'+esc(c?c.desc||'':'')+'</textarea>')
+  +(c?'':fld('الطلاب (كل سطر: الاسم، رقم الجوال) — اختياري','<textarea class="input-dark" style="'+ST+'" id="cf_students" rows="4" placeholder="أحمد محمد، 0912345678"></textarea>'))
+  +okc('حفظ',"CM.saveCourse('"+(m.cid||'')+"')"));
+};
+CM.openCourseForm=id=>openM({type:'cm_course',cid:id||''});
+CM.cfTeacher=()=>{ const v=val('cf_teacher'); $('cf_newt').style.display=v==='__new'?'block':'none'; const t=teacher(v); if(t) $('cf_rate').value=t.rate; };
+CM.cfDur=()=>{ $('cf_dur').textContent=val('cf_start')&&val('cf_end')?durTxt(val('cf_start'),val('cf_end')):''; };
+function parseStudents(txt){
+  const ok=[], bad=[];
+  txt.split(/\n/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
+    const p=l.split(/[,،\t]/).map(x=>x.trim()).filter(Boolean);
+    const phone=(p.length>1?p[p.length-1]:'').replace(/\s+/g,''), name=p[0]||'';
+    if(!name||phone.replace(/\D/g,'').length<7) bad.push(l); else ok.push({name,phone});
+  });
+  return {ok,bad};
+}
+function enrollStudent(cid,name,phone,fee,regDate){
+  const c=C(); let st=c.students.find(x=>x.phone===phone);
+  if(!st){ st={id:uid('stu'),name,phone,createdAt:nowISO()}; c.students.push(st); }
+  if(c.enrolls.some(e=>e.courseId===cid&&e.studentId===st.id&&e.status==='active')) return false;
+  c.enrolls.push({id:uid('en'),courseId:cid,studentId:st.id,fee,regDate:regDate||today(),status:'active',createdAt:nowISO(),by:who()});
+  return true;
+}
+CM.saveCourse=id=>{
+  const name=val('cf_name'), subject=val('cf_subject'), price=num(val('cf_price')), rate=num(val('cf_rate'));
+  const sd=val('cf_start'), ed=val('cf_end'), pw=parseInt(val('cf_pw'),10)||0, hrs=num(val('cf_hrs')), st=val('cf_status'), desc=val('cf_desc');
+  let tid=val('cf_teacher');
+  if(!name) return toast('اكتب اسم الكورس','err');
+  if(!sd||!ed||ed<sd) return toast('تحقق من تاريخي البداية والنهاية','err');
+  if(hrs<=0||pw<=0) return toast('أدخل عدد الحصص ومدتها','err');
+  if(price<0||rate<0) return toast('القيم المالية غير صحيحة','err');
+  let tn='',tp='';
+  if(tid==='__new'||!tid){ tn=val('cf_tname'); tp=val('cf_tphone'); if(!tn||tp.length<7) return toast('أدخل اسم وجوال المعلم','err'); tid='__new'; }
+  let sp={ok:[],bad:[]}; if(!id&&$('cf_students')) sp=parseStudents($('cf_students').value);
+  if(sp.bad.length) return toast('سطر غير صحيح في الطلاب: '+sp.bad[0],'err');
+  let n=0;
+  const ok=tx(()=>{
+    const c=C();
+    if(tid==='__new'){ let t=c.teachers.find(x=>x.phone===tp); if(!t){ t={id:uid('tc'),name:tn,phone:tp,subject,rate,createdAt:nowISO()}; c.teachers.push(t); } tid=t.id; }
+    if(id){ Object.assign(course(id),{name,subject,teacherId:tid,price,rate,startDate:sd,endDate:ed,perWeek:pw,classHours:hrs,status:st,desc,updatedAt:nowISO()}); }
+    else{ const cid=uid('cr'); c.courses.push({id:cid,name,subject,teacherId:tid,price,rate,startDate:sd,endDate:ed,perWeek:pw,classHours:hrs,status:st,desc,archived:false,createdAt:nowISO(),by:who()});
+      sp.ok.forEach(s=>{ if(enrollStudent(cid,s.name,s.phone,price,today())) n++; }); }
+  });
+  if(ok){ if(!id) addNotif('booking','كورس جديد: '+name+(n?' ('+n+' طالب)':'')); done(id?'تم تحديث الكورس':'تم إنشاء الكورس'); }
+};
+
+/* ---------------- الطلاب ---------------- */
+MODALS.cm_addst=function(m){
+  const c=course(m.cid);
+  return mdl('إضافة طلاب إلى «'+esc(c.name)+'»',
+   fld('الطلاب (كل سطر: الاسم، رقم الجوال)','<textarea class="input-dark" style="'+ST+'" id="as_list" rows="6" placeholder="أحمد محمد، 0912345678&#10;سارة علي، 0123456789"></textarea>')
+  +g2(fld('رسوم الطالب',inp('as_fee',c.price,'type="number" min="0"')),fld('تاريخ التسجيل',inp('as_date',today(),'type="date"')))
+  +'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">إذا كان رقم الجوال مسجلاً من قبل يُستخدم نفس الطالب (يمكن تسجيل الطالب في عدة كورسات).</div>'
+  +okc('إضافة',"CM.saveAddStudents('"+m.cid+"')"));
+};
+CM.openAddStudents=cid=>openM({type:'cm_addst',cid});
+CM.saveAddStudents=cid=>{
+  const sp=parseStudents(val('as_list')), fee=num(val('as_fee')), d=val('as_date')||today();
+  if(!sp.ok.length&&!sp.bad.length) return toast('اكتب طالباً واحداً على الأقل','err');
+  if(sp.bad.length) return toast('سطر غير صحيح: '+sp.bad[0],'err');
+  if(fee<0) return toast('الرسوم غير صحيحة','err');
+  let n=0,dup=0;
+  if(tx(()=>{ sp.ok.forEach(s=>{ if(enrollStudent(cid,s.name,s.phone,fee,d)) n++; else dup++; }); })) done('تمت إضافة '+n+' طالب'+(dup?' (تخطي '+dup+' مسجل مسبقاً)':''));
+};
+CM.askRemove=eid=>{ const e=byId(C().enrolls,eid); ask('إزالة طالب','سيتم إزالة «'+stName(e)+'» من الكورس مع بقاء مدفوعاته وسجل حضوره.','إزالة',"CM.removeEn('"+eid+"')"); };
+CM.removeEn=eid=>{ const e=byId(C().enrolls,eid); if(e){ e.status='removed'; e.removedAt=nowISO(); save(); } };
+MODALS.cm_transfer=function(m){
+  const e=byId(C().enrolls,m.eid), cs=C().courses.filter(c=>c.id!==e.courseId&&!c.archived&&c.status!=='cancelled');
+  if(!cs.length) return mdl('نقل طالب',empty('لا توجد كورسات أخرى')+closeB);
+  return mdl('نقل «'+esc(stName(e))+'» إلى كورس آخر',
+   fld('الكورس الجديد',sel('tr_course',cs.map(c=>[c.id,c.name+' — '+c.price+' '+DB.settings.currency]),cs[0].id))
+  +fld('الرسوم في الكورس الجديد',inp('tr_fee',cs[0].price,'type="number" min="0"'))
+  +'<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:10px;"><input type="checkbox" id="tr_carry" checked style="width:auto;"> ترحيل المبلغ المدفوع ('+money(paidOfEn(e.id))+') إلى الكورس الجديد</label>'
+  +okc('نقل',"CM.doTransfer('"+m.eid+"')"));
+};
+CM.openTransfer=eid=>openM({type:'cm_transfer',eid});
+CM.doTransfer=eid=>{
+  const e=byId(C().enrolls,eid), to=val('tr_course'), fee=num(val('tr_fee')), carry=$('tr_carry').checked;
+  if(!to||!course(to)) return toast('اختر الكورس','err');
+  if(C().enrolls.some(x=>x.courseId===to&&x.studentId===e.studentId&&x.status==='active')) return toast('الطالب مسجل في هذا الكورس','err');
+  if(tx(()=>{ const c=C(), paid=paidOfEn(eid); e.status='transferred'; e.transferredTo=to; e.transferredAt=nowISO();
+    const ne={id:uid('en'),courseId:to,studentId:e.studentId,fee,regDate:today(),status:'active',transferredFrom:eid,createdAt:nowISO(),by:who()}; c.enrolls.push(ne);
+    if(carry&&paid>0){ const amt=Math.min(paid,fee);
+      c.sPays.push({id:uid('sp'),enrollId:eid,amount:-amt,date:today(),method:'تحويل صادر',notes:'نقل إلى '+course(to).name,createdAt:nowISO(),by:who()});
+      c.sPays.push({id:uid('sp'),enrollId:ne.id,amount:amt,date:today(),method:'تحويل وارد',notes:'نقل من '+course(e.courseId).name,createdAt:nowISO(),by:who()}); } })) done('تم نقل الطالب');
+};
+function studentRows(){
+  const q=(S().sq||'').toLowerCase();
+  return C().students.filter(s=>!q||(s.name+' '+s.phone).toLowerCase().indexOf(q)>=0).map(s=>{
+    const en=C().enrolls.filter(e=>e.studentId===s.id), act=en.filter(e=>e.status==='active');
+    const fees=act.reduce((a,e)=>a+e.fee,0), paid=en.reduce((a,e)=>a+paidOfEn(e.id),0), rest=act.reduce((a,e)=>a+Math.max(0,e.fee-paidOfEn(e.id)),0);
+    return [esc(s.name),'<span class="num">'+esc(s.phone)+'</span>',act.length,'<span class="num">'+money(fees)+'</span>','<span class="num">'+money(paid)+'</span>','<span class="num" style="'+(rest>0?'color:#e08a7c;font-weight:700;':'')+'">'+money(rest)+'</span>','<button class="btn btn-ghost-dark btn-sm" onclick="CM.openStudent(\''+s.id+'\')">تفاصيل</button> <button class="btn btn-brass btn-sm" onclick="CM.openEnroll(\''+s.id+'\')">+ تسجيل في كورس</button>'];
+  });
+}
+const stuHead=['الطالب','الجوال','كورسات نشطة','الرسوم','المدفوع','المتبقي',''];
+function vStudents(){
+  return '<div class="panel"><div class="toolbar"><input class="input-dark" placeholder="بحث بالاسم أو الجوال…" value="'+esc(S().sq||'')+'" oninput="CM.sSearch(this.value)"></div><div id="cm_slist">'+tbl(stuHead,studentRows())+'</div></div>';
+}
+CM.sSearch=v=>{ S().sq=v; const e=$('cm_slist'); if(e) e.innerHTML=tbl(stuHead,studentRows()); };
+MODALS.cm_student=function(m){
+  const s=student(m.sid); if(!s) return mdl('طالب',empty('غير موجود')+closeB);
+  const en=C().enrolls.filter(e=>e.studentId===s.id);
+  return mdl(esc(s.name)+' — <span class="num" style="font-size:14px;">'+esc(s.phone)+'</span>',
+   tbl(['الكورس','الرسوم','المدفوع','المتبقي','الحضور','الحالة'],en.map(e=>{const c=course(e.courseId)||{},p=paidOfEn(e.id),a=attPct(e.id);return [esc(c.name||'—'),money(e.fee),money(p),money(e.status==='active'?Math.max(0,e.fee-p):0),a.pct===null?'—':a.pct+'%',e.status==='active'?bdg(PS,enPay(e)):ENS[e.status]];}))
+  +'<h3 style="font-size:14px;margin:14px 0 6px;">سجل المدفوعات</h3>'+tbl(['التاريخ','الكورس','المبلغ','الطريقة'],C().sPays.filter(p=>en.some(e=>e.id===p.enrollId)).sort((a,b)=>b.date.localeCompare(a.date)).map(p=>{const e=byId(C().enrolls,p.enrollId);return [fD(p.date),esc((course(e.courseId)||{}).name||''),money(p.amount),esc(p.method||'')];}))+closeB,680);
+};
+CM.openStudent=sid=>openM({type:'cm_student',sid});
+MODALS.cm_enroll=function(m){
+  const s=student(m.sid), cs=C().courses.filter(c=>!c.archived&&c.status!=='cancelled'&&!C().enrolls.some(e=>e.courseId===c.id&&e.studentId===s.id&&e.status==='active'));
+  if(!cs.length) return mdl('تسجيل في كورس',empty('الطالب مسجل في كل الكورسات المتاحة')+closeB);
+  return mdl('تسجيل «'+esc(s.name)+'» في كورس',fld('الكورس',sel('en_course',cs.map(c=>[c.id,c.name]),cs[0].id,'onchange="CM.enFee()"'))+fld('الرسوم',inp('en_fee',cs[0].price,'type="number" min="0"'))+okc('تسجيل',"CM.doEnroll('"+m.sid+"')"));
+};
+CM.openEnroll=sid=>openM({type:'cm_enroll',sid});
+CM.enFee=()=>{ const c=course(val('en_course')); if(c) $('en_fee').value=c.price; };
+CM.doEnroll=sid=>{ const s=student(sid), cid=val('en_course'), fee=num(val('en_fee')); if(!cid) return; if(tx(()=>{ if(!enrollStudent(cid,s.name,s.phone,fee,today())) fail('الطالب مسجل مسبقاً'); })) done('تم التسجيل'); };
+
+/* ---------------- دفعات الطلاب والمصروفات ---------------- */
+MODALS.cm_spay=function(m){
+  const e=byId(C().enrolls,m.eid), rest=r2(e.fee-paidOfEn(e.id));
+  return mdl('دفعة من «'+esc(stName(e))+'»','<div style="font-size:13px;color:#C9CBD3;margin-bottom:10px;">الرسوم '+money(e.fee)+' · المدفوع '+money(paidOfEn(e.id))+' · <b style="color:var(--brass-l);">المتبقي '+money(rest)+'</b></div>'
+   +g2(fld('المبلغ',inp('sp_amt',rest,'type="number" min="0"')),fld('التاريخ',inp('sp_date',today(),'type="date"')))
+   +fld('طريقة الدفع',sel('sp_method',METHODS.map(x=>[x,x]),METHODS[0]))+fld('ملاحظات',inp('sp_notes',''))+okc('تسجيل الدفعة',"CM.saveSPay('"+m.eid+"')"));
+};
+CM.openSPay=eid=>openM({type:'cm_spay',eid});
+CM.saveSPay=eid=>{
+  const e=byId(C().enrolls,eid); if(!e) return;
+  const amt=r2(num(val('sp_amt'))), rest=r2(e.fee-paidOfEn(eid));
+  if(amt<=0) return toast('اكتب مبلغاً صحيحاً','err');
+  if(amt>rest) return toast('المبلغ أكبر من المتبقي ('+rest+')','err');
+  const p={id:uid('sp'),enrollId:eid,amount:amt,date:val('sp_date')||today(),method:val('sp_method'),notes:val('sp_notes'),createdAt:nowISO(),by:who()};
+  if(dupPay(C().sPays,'enrollId',p)) return toast('تم تسجيل نفس الدفعة قبل لحظات','err');
+  if(tx(()=>{ C().sPays.push(p); })){ addNotif('checkout','دفعة كورس: '+stName(e)+' — '+money(amt)); done('تم تسجيل الدفعة'); }
+};
+CM.askDelSPay=id=>ask('حذف دفعة','سيتم حذف الدفعة من الإيرادات.','حذف',"CM.delSPay('"+id+"')");
+CM.delSPay=id=>{ C().sPays=C().sPays.filter(p=>p.id!==id); save(); };
+MODALS.cm_exp=function(m){
+  return mdl('مصروف للكورس',fld('البند',inp('ex_title',''))+g2(fld('المبلغ',inp('ex_amt','','type="number" min="0"')),fld('التاريخ',inp('ex_date',today(),'type="date"')))+fld('ملاحظات',inp('ex_notes',''))+okc('حفظ',"CM.saveExp('"+m.cid+"')"));
+};
+CM.openExp=cid=>openM({type:'cm_exp',cid});
+CM.saveExp=cid=>{
+  const t=val('ex_title'), a=r2(num(val('ex_amt')));
+  if(!t||a<=0) return toast('أدخل البند والمبلغ','err');
+  const x={id:uid('cx'),courseId:cid,title:t,amount:a,date:val('ex_date')||today(),notes:val('ex_notes'),createdAt:nowISO(),by:who()};
+  if(C().exps.some(y=>y.courseId===cid&&y.title===t&&y.amount===a&&y.date===x.date&&Date.now()-new Date(y.createdAt).getTime()<30000)) return toast('تم تسجيل نفس المصروف قبل لحظات','err');
+  if(tx(()=>{ C().exps.push(x); })) done('تم تسجيل المصروف');
+};
+CM.askDelExp=id=>ask('حذف مصروف','هل تريد حذف هذا المصروف؟','حذف',"CM.delExp('"+id+"')");
+CM.delExp=id=>{ C().exps=C().exps.filter(x=>x.id!==id); save(); };
+
+/* ---------------- المعلمون ---------------- */
+function vTeachers(){
+  return '<div class="panel"><div class="panel-h"><h3>المعلمون</h3><button class="btn btn-brass btn-sm" onclick="CM.openTeacherForm()">+ إضافة معلم</button></div>'
+  +tbl(['الاسم','الجوال','التخصص','أجر الساعة','الكورسات','ساعات التدريس','المستحق','المدفوع','المتبقي',''],C().teachers.map(t=>{
+    const k=tStats(t.id);
+    return [esc(t.name),'<span class="num">'+esc(t.phone)+'</span>',esc(t.subject||'—'),money(t.rate),k.courses,k.hours,money(k.earned),money(k.paid),'<b style="'+(k.bal>0?'color:#e08a7c;':'')+'">'+money(k.bal)+'</b>',
+     '<div style="display:flex;gap:5px;"><button class="btn btn-brass btn-sm" onclick="CM.openTPay(\''+t.id+'\')">دفعة</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.openTStmt(\''+t.id+'\')">كشف حساب</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.openTeacherForm(\''+t.id+'\')">تعديل</button>'+(isAdmin()?'<button class="btn btn-danger btn-sm" onclick="CM.askDelTeacher(\''+t.id+'\')">حذف</button>':'')+'</div>'];
+  }))+'</div>';
+}
+MODALS.cm_teacher=function(m){
+  const t=m.tid?teacher(m.tid):null;
+  return mdl(t?'تعديل معلم':'إضافة معلم',g2(fld('الاسم الكامل',inp('tf_name',t&&t.name)),fld('الجوال',inp('tf_phone',t&&t.phone)))+g2(fld('التخصص',inp('tf_subject',t&&t.subject)),fld('أجر الساعة ('+DB.settings.currency+')',inp('tf_rate',t?t.rate:'','type="number" min="0"')))
+   +'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">تغيير الأجر يؤثر على الكورسات الجديدة فقط؛ الساعات المكتملة تحتفظ بسعرها وقت الإتمام.</div>'+okc('حفظ',"CM.saveTeacher('"+(m.tid||'')+"')"));
+};
+CM.openTeacherForm=id=>openM({type:'cm_teacher',tid:id||''});
+CM.saveTeacher=id=>{
+  const name=val('tf_name'), phone=val('tf_phone'), subject=val('tf_subject'), rate=num(val('tf_rate'));
+  if(!name||phone.length<7) return toast('أدخل الاسم والجوال','err');
+  if(rate<0) return toast('الأجر غير صحيح','err');
+  if(C().teachers.some(t=>t.phone===phone&&t.id!==id)) return toast('هذا الجوال مسجل لمعلم آخر','err');
+  if(tx(()=>{ if(id) Object.assign(teacher(id),{name,phone,subject,rate}); else C().teachers.push({id:uid('tc'),name,phone,subject,rate,createdAt:nowISO()}); })) done('تم الحفظ');
+};
+CM.askDelTeacher=id=>{ if(C().courses.some(c=>c.teacherId===id)||C().tPays.some(p=>p.teacherId===id)||C().sessions.some(s=>s.teacherId===id)) return toast('لا يمكن حذف معلم له كورسات أو مدفوعات','err'); ask('حذف معلم','هل تريد حذف هذا المعلم؟','حذف',"CM.delTeacher('"+id+"')"); };
+CM.delTeacher=id=>{ C().teachers=C().teachers.filter(t=>t.id!==id); save(); };
+MODALS.cm_tpay=function(m){
+  const t=teacher(m.tid), k=tStats(m.tid);
+  return mdl('دفعة للمعلم «'+esc(t.name)+'»','<div style="font-size:13px;color:#C9CBD3;margin-bottom:10px;">المستحق '+money(k.earned)+' · المدفوع '+money(k.paid)+' · <b style="color:var(--brass-l);">المتبقي '+money(k.bal)+'</b></div>'
+   +g2(fld('المبلغ',inp('tp_amt',Math.max(0,k.bal),'type="number" min="0"')),fld('التاريخ',inp('tp_date',today(),'type="date"')))
+   +fld('طريقة الدفع',sel('tp_method',METHODS.map(x=>[x,x]),METHODS[0]))+fld('ملاحظات',inp('tp_notes',''))+okc('تسجيل الدفعة',"CM.saveTPay('"+m.tid+"')"));
+};
+CM.openTPay=tid=>openM({type:'cm_tpay',tid});
+CM.saveTPay=tid=>{
+  const k=tStats(tid), amt=r2(num(val('tp_amt')));
+  if(amt<=0) return toast('اكتب مبلغاً صحيحاً','err');
+  if(amt>k.bal) return toast('المبلغ أكبر من المستحق المتبقي ('+k.bal+')','err');
+  const p={id:uid('tpy'),teacherId:tid,amount:amt,date:val('tp_date')||today(),method:val('tp_method'),notes:val('tp_notes'),createdAt:nowISO(),by:who()};
+  if(dupPay(C().tPays,'teacherId',p)) return toast('تم تسجيل نفس الدفعة قبل لحظات','err');
+  if(tx(()=>{ C().tPays.push(p); })){ addNotif('checkout','دفعة معلم: '+teacher(tid).name+' — '+money(amt)); done('تم تسجيل الدفعة'); }
+};
+MODALS.cm_tstmt=function(m){
+  const t=teacher(m.tid), k=tStats(m.tid);
+  const cs=C().courses.filter(c=>c.teacherId===t.id).map(c=>esc(c.name)).join('، ')||'—';
+  const done_=C().sessions.filter(s=>s.status==='completed'&&s.teacherId===t.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const pays=C().tPays.filter(p=>p.teacherId===t.id).sort((a,b)=>b.date.localeCompare(a.date));
+  return mdl(esc(t.name)+' — كشف حساب','<div style="font-size:13px;color:#C9CBD3;line-height:1.9;margin-bottom:10px;">الجوال: '+esc(t.phone)+' · التخصص: '+esc(t.subject||'—')+' · أجر الساعة: '+money(t.rate)+'<br>الكورسات: '+cs+'</div>'
+   +'<div class="mini-stats"><div class="mini-stat"><div class="v">'+k.hours+'</div><div class="l">ساعات</div></div><div class="mini-stat"><div class="v" style="font-size:14px;">'+money(k.earned)+'</div><div class="l">المستحق</div></div><div class="mini-stat"><div class="v" style="font-size:14px;">'+money(k.paid)+'</div><div class="l">المدفوع</div></div><div class="mini-stat"><div class="v" style="font-size:14px;">'+money(k.bal)+'</div><div class="l">المتبقي</div></div></div>'
+   +'<h3 style="font-size:14px;margin:14px 0 6px;">سجل المدفوعات</h3>'+tbl(['التاريخ','المبلغ','الطريقة','ملاحظات',''],pays.map(p=>[fD(p.date),money(p.amount),esc(p.method||''),esc(p.notes||''),isAdmin()?'<button class="btn btn-danger btn-sm" onclick="CM.askDelTPay(\''+p.id+'\')">حذف</button>':'']))
+   +'<h3 style="font-size:14px;margin:14px 0 6px;">الحصص المكتملة</h3>'+tbl(['التاريخ','الكورس','الساعات','المستحق'],done_.slice(0,30).map(s=>[fD(s.date),esc((course(s.courseId)||{}).name||''),s.hours,money(sessEarn(s))]))
+   +'<div style="display:flex;gap:10px;margin-top:12px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="CM.printTeacher(\''+t.id+'\')">🖨 طباعة / PDF</button><button class="btn btn-ghost-dark" style="flex:1;justify-content:center;" onclick="App.closeModal()">إغلاق</button></div>',700);
+};
+CM.openTStmt=tid=>openM({type:'cm_tstmt',tid});
+CM.printTeacher=tid=>printReport(buildReport({type:'teacherStatement',param:tid,from:'',to:''}));
+CM.askDelTPay=id=>ask('حذف دفعة معلم','سيرجع المبلغ إلى مستحقات المعلم.','حذف',"CM.delTPay('"+id+"')");
+CM.delTPay=id=>{ C().tPays=C().tPays.filter(p=>p.id!==id); save(); };
+
+/* ---------------- الجدول ---------------- */
+function fSess(){ const s=S(); return C().sessions.filter(x=>(!s.fCourse||x.courseId===s.fCourse)&&(!s.fTeacher||(course(x.courseId)||{}).teacherId===s.fTeacher)); }
+const COL={scheduled:['#3c5aa0','rgba(60,90,160,.16)'],completed:['#3E7A5B','rgba(62,122,91,.18)'],postponed:['#C9A15A','rgba(201,161,90,.12)'],cancelled:['#B4483A','rgba(180,72,58,.14)']};
+function chip(s){
+  const c=course(s.courseId)||{name:'—'}, t=teacher(c.teacherId)||{name:'—'}, col=COL[s.status], dim=(s.status==='postponed'||s.status==='cancelled')?'text-decoration:line-through;opacity:.7;':'';
+  return '<div onclick="CM.openSess(\''+s.id+'\')" style="cursor:pointer;border:1px solid '+col[0]+';background:'+col[1]+';border-radius:9px;padding:7px 9px;margin-bottom:6px;font-size:12px;"><div style="'+dim+'"><b>'+esc(c.name)+'</b><div class="num">'+s.start+'–'+s.end+' · '+s.hours+'س</div><div>'+esc(t.name)+(s.room?' · '+esc(s.room):'')+'</div></div><div style="margin-top:3px;">'+bdg(SS,s.status)+(s.rescheduledFrom?' <span style="color:#E2C892;">↻ معاد جدولتها</span>':'')+'</div></div>';
+}
+function vSchedule(){
+  const s=S(), all=fSess(), views=[['week','أسبوعي'],['day','يومي'],['month','شهري']];
+  let title='', body='';
+  if(s.view==='week'){
+    const d=pd(s.date), st=addDays(s.date,-((d.getDay()+1)%7)); title='أسبوع '+fD(st)+' – '+fD(addDays(st,6));
+    body='<div class="scrollx"><div style="display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:8px;">'+WEEK.map((_,i)=>{ const iso=addDays(st,i), list=all.filter(x=>x.date===iso).sort((a,b)=>a.start.localeCompare(b.start));
+      return '<div style="background:var(--ink3);border:1px solid '+(iso===today()?'var(--brass)':'var(--line)')+';border-radius:10px;padding:8px;min-height:120px;"><div style="font-weight:700;font-size:13px;margin-bottom:6px;cursor:pointer;" onclick="CM.day(\''+iso+'\')">'+DAYS[pd(iso).getDay()]+' <span class="num" style="color:var(--ink-soft);font-weight:400;">'+fD(iso).slice(1,6)+'</span></div>'+list.map(chip).join('')+'</div>'; }).join('')+'</div></div>';
+  } else if(s.view==='day'){
+    title=DAYS[pd(s.date).getDay()]+' '+fD(s.date);
+    const list=all.filter(x=>x.date===s.date).sort((a,b)=>a.start.localeCompare(b.start));
+    body=list.length?list.map(chip).join(''):empty('لا توجد حصص في هذا اليوم');
+  } else {
+    const d0=pd(s.date), y=d0.getFullYear(), m=d0.getMonth(), off=(new Date(y,m,1).getDay()+1)%7, dim=new Date(y,m+1,0).getDate();
+    title=MONTHS[m]+' '+y; let cells='';
+    for(let i=0;i<off;i++) cells+='<div></div>';
+    for(let d=1;d<=dim;d++){ const iso=ymd(new Date(y,m,d)), list=all.filter(x=>x.date===iso).sort((a,b)=>a.start.localeCompare(b.start));
+      cells+='<div onclick="CM.day(\''+iso+'\')" style="cursor:pointer;background:var(--ink3);border:1px solid '+(iso===today()?'var(--brass)':'var(--line)')+';border-radius:9px;padding:6px;min-height:84px;font-size:11px;"><div class="num" style="font-weight:700;margin-bottom:3px;">'+d+'</div>'
+        +list.slice(0,3).map(x=>'<div style="border-right:3px solid '+COL[x.status][0]+';padding-right:4px;margin-bottom:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;'+((x.status==='postponed'||x.status==='cancelled')?'text-decoration:line-through;opacity:.6;':'')+'">'+x.start+' '+esc((course(x.courseId)||{}).name||'')+'</div>').join('')+(list.length>3?'<div style="color:var(--ink-soft);">+'+(list.length-3)+' أخرى</div>':'')+'</div>'; }
+    body='<div class="scrollx"><div style="min-width:640px;"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;font-size:12px;color:var(--ink-soft);text-align:center;">'+WEEK.map(i=>'<div>'+DAYS[i]+'</div>').join('')+'</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">'+cells+'</div></div></div>';
+  }
+  const leg=Object.keys(SS).map(k=>'<span style="display:flex;align-items:center;gap:5px;font-size:12px;"><i class="dot" style="background:'+COL[k][0]+';"></i>'+SS[k][0]+'</span>').join('');
+  return '<div class="panel"><div class="toolbar"><div class="chip-filter">'+views.map(v=>'<span class="chip '+(s.view===v[0]?'on':'')+'" onclick="CM.view(\''+v[0]+'\')">'+v[1]+'</span>').join('')+'</div>'
+  +'<button class="btn btn-ghost-dark btn-sm" onclick="CM.shift(-1)">→ السابق</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.today()">اليوم</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.shift(1)">التالي ←</button><b>'+title+'</b></div>'
+  +'<div class="toolbar">'+sel('sch_fc',cOpts('كل الكورسات'),s.fCourse,'class="input-dark" onchange="CM.filt()" style="width:auto;min-width:160px;padding:8px;"').replace('style="'+ST+'"','')+sel('sch_ft',tOpts('كل المعلمين'),s.fTeacher,'onchange="CM.filt()" style="width:auto;min-width:160px;padding:8px;"').replace('style="'+ST+'"','')
+  +'<div style="display:flex;gap:12px;flex-wrap:wrap;">'+leg+'</div><div style="display:flex;gap:6px;margin-right:auto;"><button class="btn btn-brass btn-sm" onclick="CM.openSched(\'\',\'rec\')">+ جدولة متكررة</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.openSched(\'\',\'one\')">+ حصة منفردة</button></div></div>'+body+'</div>';
+}
+CM.view=v=>{ S().view=v; render(); };
+CM.day=iso=>{ const s=S(); s.date=iso; s.view='day'; render(); };
+CM.today=()=>{ S().date=today(); render(); };
+CM.filt=()=>{ const s=S(); s.fCourse=val('sch_fc'); s.fTeacher=val('sch_ft'); render(); };
+CM.shift=n=>{ const s=S(); if(s.view==='week') s.date=addDays(s.date,7*n); else if(s.view==='day') s.date=addDays(s.date,n); else { const d=pd(s.date); d.setDate(1); d.setMonth(d.getMonth()+n); s.date=ymd(d); } render(); };
+
+/* ---------------- جدولة الحصص ---------------- */
+function roomPick(cur){ return fld('القاعة',sel('sc_room',[['','بدون قاعة']].concat(C().rooms.map(r=>[r,r])),cur||'')+'<input class="input-dark" style="'+ST+'margin-top:6px;" id="sc_room2" placeholder="أو اكتب اسم قاعة جديدة">'); }
+MODALS.cm_sched=function(m){
+  const rec=m.mode==='rec', c=m.cid?course(m.cid):null, cs=C().courses.filter(x=>!x.archived&&x.status!=='cancelled');
+  if(!cs.length) return mdl('جدولة حصص',empty('أنشئ كورساً أولاً')+closeB);
+  const cur=c||cs[0];
+  return mdl(rec?'جدولة حصص متكررة':'حصة منفردة',
+   fld('الكورس',sel('sc_course',cs.map(x=>[x.id,x.name]),cur.id))
+  +(rec?fld('أيام الأسبوع','<div style="display:flex;gap:8px;flex-wrap:wrap;">'+WEEK.map(d=>'<label style="display:flex;gap:5px;align-items:center;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;"><input type="checkbox" class="sc_day" value="'+d+'" style="width:auto;">'+DAYS[d]+'</label>').join('')+'</div>'):fld('التاريخ',inp('sc_date',today(),'type="date"')))
+  +g2(fld('وقت البداية',inp('sc_start','16:00','type="time"')),fld('وقت النهاية',inp('sc_end',toHM(960+Math.round(cur.classHours*60)),'type="time"')))
+  +(rec?g2(fld('من تاريخ',inp('sc_from',cur.startDate>today()?cur.startDate:today(),'type="date"')),fld('إلى تاريخ',inp('sc_to',cur.endDate,'type="date"'))):'')
+  +roomPick('')+okc(rec?'إنشاء الحصص':'إضافة الحصة',"CM.saveSched('"+m.mode+"')"));
+};
+CM.openSched=(cid,mode)=>openM({type:'cm_sched',cid,mode});
+function pickRoom(){ const r2_=val('sc_room2'); if(r2_){ if(C().rooms.indexOf(r2_)<0) C().rooms.push(r2_); return r2_; } return val('sc_room'); }
+CM.saveSched=mode=>{
+  const cid=val('sc_course'), c=course(cid), st=val('sc_start'), en=val('sc_end');
+  if(!c) return toast('اختر الكورس','err');
+  if(!st||!en||tm(en)<=tm(st)) return toast('وقت النهاية يجب أن يكون بعد البداية','err');
+  const room=val('sc_room2')||val('sc_room'), hours=sHours(st,en);
+  let dates=[];
+  if(mode==='rec'){
+    const days=[...document.querySelectorAll('.sc_day:checked')].map(x=>+x.value), f=val('sc_from'), t=val('sc_to');
+    if(!days.length) return toast('اختر يوماً واحداً على الأقل','err');
+    if(!f||!t||t<f) return toast('تحقق من الفترة','err');
+    for(let d=f,i=0;d<=t&&i<800;d=addDays(d,1),i++) if(days.indexOf(pd(d).getDay())>=0) dates.push(d);
+    if(!dates.length) return toast('لا توجد أيام مطابقة في هذه الفترة','err');
+  } else { const d=val('sc_date'); if(!d) return toast('اختر التاريخ','err'); dates=[d]; }
+  let made=0; const skipped=[];
+  if(tx(()=>{ pickRoom(); const seriesId=uid('ser');
+    dates.forEach(d=>{
+      if(C().sessions.some(s=>s.courseId===cid&&s.date===d&&s.start===st&&s.status!=='cancelled'&&s.status!=='postponed')){ skipped.push(fD(d)+' — حصة مكررة'); return; }
+      const cf=conflicts(c,d,st,en,null,room); if(cf.length){ skipped.push(fD(d)+' — '+cf[0]); return; }
+      C().sessions.push({id:uid('ss'),courseId:cid,date:d,start:st,end:en,hours,room,status:'scheduled',seriesId,createdAt:nowISO(),by:who()}); made++; }); })){
+    if(mode==='one'&&!made){ toast(skipped[0]||'تعذر الإضافة','err'); return; }
+    addNotif('booking','تمت جدولة '+made+' حصة لكورس «'+c.name+'»');
+    if(skipped.length) openM({type:'cm_info',title:'تمت جدولة '+made+' حصة',html:'<div style="font-size:13px;margin-bottom:8px;">تم تخطي '+skipped.length+' موعد:</div><div class="stack" style="font-size:12.5px;color:#e0b57c;">'+skipped.slice(0,20).map(x=>'<div>'+esc(x)+'</div>').join('')+'</div>'});
+    else done('تمت جدولة '+made+' حصة');
+    if(skipped.length) save();
+  }
+};
+MODALS.cm_info=function(m){ return mdl(m.title,m.html+closeB); };
+
+/* ---------------- نافذة الحصة ---------------- */
+MODALS.cm_sess=function(m){
+  const s=byId(C().sessions,m.sid); if(!s) return mdl('الحصة',empty('غير موجودة')+closeB);
+  const c=course(s.courseId)||{}, t=teacher(c.teacherId)||{};
+  const row=(l,v)=>'<div style="display:flex;justify-content:space-between;gap:10px;"><span style="color:var(--ink-soft);">'+l+'</span><span>'+v+'</span></div>';
+  let h='<div class="stack" style="font-size:13.5px;margin-bottom:12px;">'+row('الكورس',esc(c.name||'—'))+row('المعلم',esc(t.name||'—'))+row('التاريخ',fD(s.date)+' ('+DAYS[pd(s.date).getDay()]+')')+row('الوقت','<span class="num">'+s.start+' – '+s.end+'</span> ('+s.hours+' ساعة)')+row('القاعة',esc(s.room||'—'))+row('الحالة',bdg(SS,s.status))
+   +(s.status==='completed'?row('مستحق المعلم',money(sessEarn(s))):'')+(s.reason?row('السبب',esc(s.reason)):'')+(s.rescheduledFrom?row('معاد جدولتها من',fD(s.origDate)+' '+(s.origStart||'')):'')+'</div>';
+  const logs=C().logs.filter(l=>l.sessionId===s.id||l.newSessionId===s.id);
+  if(logs.length) h+='<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;line-height:1.8;"><b>سجل التغييرات:</b>'+logs.map(l=>'<div>• '+(l.action==='postpone'?'تأجيل من '+fD(l.fromDate)+' '+l.fromStart+' إلى '+fD(l.toDate)+' '+l.toStart:l.action==='cancel'?'إلغاء':'تعديل')+' — '+esc(l.reason||'')+' ('+esc(l.by||'')+' · '+fD(l.at.slice(0,10))+')</div>').join('')+'</div>';
+  if(s.status==='scheduled'||s.status==='completed'){
+    const ens=enrollsOf(s.courseId,false).concat(enrollsOf(s.courseId,true).filter(e=>e.status!=='active'&&C().att.some(a=>a.sessionId===s.id&&a.enrollId===e.id)));
+    h+='<div class="panel-h" style="margin-bottom:8px;"><h3 style="font-size:14px;">كشف الحضور</h3><button class="btn btn-ghost-dark btn-sm" onclick="CM.allPresent()">تحديد الكل حاضر</button></div><div class="stack" style="margin-bottom:12px;">'
+     +(ens.length?ens.map(e=>{ const r=C().att.find(a=>a.sessionId===s.id&&a.enrollId===e.id), cur=r?r.status:'';
+        const rd=(v,l)=>'<label style="display:flex;gap:4px;align-items:center;font-size:12.5px;"><input type="radio" name="at_'+e.id+'" value="'+v+'" '+(cur===v?'checked':'')+' style="width:auto;">'+l+'</label>';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:6px 0;"><span style="font-size:13.5px;">'+esc(stName(e))+'</span><span style="display:flex;gap:10px;">'+rd('present','حاضر')+rd('absent','غائب')+rd('excused','بعذر')+'</span></div>'; }).join(''):'<div class="empty" style="padding:12px;">لا يوجد طلاب مسجلون</div>')+'</div>';
+  }
+  let b='';
+  if(s.status==='scheduled') b='<button class="btn btn-brass" onclick="CM.saveAtt(\''+s.id+'\')">حفظ الحضور</button><button class="btn btn-brass" onclick="CM.complete(\''+s.id+'\')">✔ إتمام الحصة</button><button class="btn btn-ghost-dark" onclick="CM.openPostpone(\''+s.id+'\')">تأجيل</button><button class="btn btn-ghost-dark" onclick="CM.openEditSess(\''+s.id+'\')">تعديل</button><button class="btn btn-danger" onclick="CM.openCancelSess(\''+s.id+'\')">إلغاء الحصة</button>';
+  else if(s.status==='completed') b='<button class="btn btn-brass" onclick="CM.saveAtt(\''+s.id+'\')">حفظ الحضور</button><button class="btn btn-ghost-dark" onclick="CM.askRevert(\''+s.id+'\')">إرجاع إلى مجدولة</button>';
+  else if(s.status==='postponed'&&s.movedTo) b='<button class="btn btn-brass" onclick="CM.openSess(\''+s.movedTo+'\')">فتح الموعد الجديد</button>';
+  return mdl('تفاصيل الحصة',h+'<div style="display:flex;gap:8px;flex-wrap:wrap;">'+b+'<button class="btn btn-ghost-dark" onclick="App.closeModal()">إغلاق</button></div>',560);
+};
+CM.openSess=sid=>openM({type:'cm_sess',sid});
+CM.allPresent=()=>document.querySelectorAll('input[type=radio][value=present]').forEach(r=>{ r.checked=true; });
+function readAtt(sid){
+  const s=byId(C().sessions,sid), c=C();
+  c.enrolls.filter(e=>e.courseId===s.courseId).forEach(e=>{
+    const r=document.querySelector('input[name="at_'+e.id+'"]:checked'); if(!r) return;
+    const ex=c.att.find(a=>a.sessionId===sid&&a.enrollId===e.id);
+    if(ex){ ex.status=r.value; ex.at=nowISO(); ex.by=who(); } else c.att.push({id:uid('at'),sessionId:sid,enrollId:e.id,status:r.value,at:nowISO(),by:who()});
+  });
+}
+CM.saveAtt=sid=>{ if(tx(()=>readAtt(sid))){ UI.modal=null; toast('تم حفظ الحضور'); save(); } };
+CM.complete=sid=>{
+  const s=byId(C().sessions,sid); if(!s||s.status!=='scheduled') return;
+  if(s.date>today()) return toast('لا يمكن إتمام حصة بتاريخ مستقبلي','err');
+  const c=course(s.courseId); if(!c) return;
+  if(tx(()=>{ readAtt(sid); s.status='completed'; s.completedAt=nowISO(); s.completedBy=who(); s.rate=c.rate; s.teacherId=c.teacherId; s.hours=sHours(s.start,s.end); })){
+    addNotif('checkout','اكتملت حصة «'+c.name+'» — '+s.hours+' ساعة'); done('تم إتمام الحصة واحتساب '+s.hours+' ساعة');
+  }
+};
+CM.askRevert=sid=>ask('إرجاع الحصة إلى مجدولة','ستُخصم ساعاتها من مستحقات المعلم.','إرجاع',"CM.revert('"+sid+"')");
+CM.revert=sid=>{
+  const s=byId(C().sessions,sid); if(!s||s.status!=='completed') return;
+  const k=tStats(s.teacherId);
+  if(k.earned-sessEarn(s)<k.paid){ toast('لا يمكن: المعلم استلم مبالغ تغطي هذه الحصة','err'); return; }
+  s.status='scheduled'; delete s.rate; delete s.teacherId; delete s.completedAt; toast('تم الإرجاع'); save();
+};
+MODALS.cm_post=function(m){
+  const s=byId(C().sessions,m.sid), c=course(s.courseId)||{};
+  return mdl('تأجيل حصة «'+esc(c.name)+'»','<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">الموعد الحالي: '+fD(s.date)+' '+s.start+' – '+s.end+'. ستبقى الحصة الأصلية في السجل كـ«مؤجلة» ولا تُحتسب للمعلم.</div>'
+   +fld('سبب التأجيل',sel('pp_reason',REASONS.map(x=>[x,x]),REASONS[0],'onchange="CM.ppR()"'))+'<div id="pp_o" style="display:none;">'+fld('اذكر السبب',inp('pp_other',''))+'</div>'
+   +g2(fld('التاريخ الجديد',inp('pp_date',addDays(s.date,1),'type="date"')),fld('الوقت الجديد',inp('pp_start',s.start,'type="time"')))+okc('تأكيد التأجيل',"CM.doPostpone('"+m.sid+"')"));
+};
+CM.openPostpone=sid=>openM({type:'cm_post',sid});
+CM.ppR=()=>{ $('pp_o').style.display=val('pp_reason')==='أخرى'?'block':'none'; };
+CM.doPostpone=sid=>{
+  const s=byId(C().sessions,sid); if(!s||s.status!=='scheduled') return toast('لا يمكن تأجيل هذه الحصة','err');
+  let reason=val('pp_reason'); if(reason==='أخرى') reason=val('pp_other')||'أخرى';
+  const nd=val('pp_date'), ns=val('pp_start'); if(!nd||!ns) return toast('أدخل التاريخ والوقت الجديدين','err');
+  if(nd===s.date&&ns===s.start) return toast('اختر موعداً مختلفاً','err');
+  const endMin=tm(ns)+Math.round(s.hours*60); if(endMin>=1440) return toast('وقت النهاية يتجاوز منتصف الليل','err');
+  const ne=toHM(endMin), c=course(s.courseId), cf=conflicts(c,nd,ns,ne,s.id,s.room);
+  if(cf.length) return toast(cf[0],'err');
+  if(tx(()=>{ const n={id:uid('ss'),courseId:s.courseId,date:nd,start:ns,end:ne,hours:s.hours,room:s.room,status:'scheduled',rescheduledFrom:s.id,origDate:s.origDate||s.date,origStart:s.origStart||s.start,createdAt:nowISO(),by:who()};
+    C().sessions.push(n); s.status='postponed'; s.reason=reason; s.movedTo=n.id; s.postponedAt=nowISO(); s.postponedBy=who();
+    C().logs.push({id:uid('lg'),sessionId:s.id,newSessionId:n.id,action:'postpone',fromDate:s.date,fromStart:s.start,toDate:nd,toStart:ns,reason,by:who(),at:nowISO()}); })){
+    addNotif('booking','تأجيل حصة «'+c.name+'» من '+fD(s.date)+' إلى '+fD(nd)+' '+ns+' ('+reason+')'); done('تم التأجيل وتحديث الجدول');
+  }
+};
+MODALS.cm_cancel=function(m){ return mdl('إلغاء الحصة','<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">الحصة الملغاة لا تُحتسب في مستحقات المعلم.</div>'+fld('سبب الإلغاء',inp('cn_reason',''))+okc('تأكيد الإلغاء',"CM.doCancelSess('"+m.sid+"')")); };
+CM.openCancelSess=sid=>openM({type:'cm_cancel',sid});
+CM.doCancelSess=sid=>{
+  const s=byId(C().sessions,sid), r=val('cn_reason'); if(!s||s.status!=='scheduled') return;
+  if(!r) return toast('اكتب سبب الإلغاء','err');
+  if(tx(()=>{ s.status='cancelled'; s.reason=r; C().logs.push({id:uid('lg'),sessionId:sid,action:'cancel',reason:r,by:who(),at:nowISO()}); })){ addNotif('booking','إلغاء حصة بتاريخ '+fD(s.date)); done('تم إلغاء الحصة'); }
+};
+MODALS.cm_editsess=function(m){
+  const s=byId(C().sessions,m.sid);
+  return mdl('تعديل الحصة',g2(fld('التاريخ',inp('es_date',s.date,'type="date"')),fld('القاعة',sel('es_room',[['','بدون قاعة']].concat(C().rooms.map(r=>[r,r])),s.room||'')))+g2(fld('البداية',inp('es_start',s.start,'type="time"')),fld('النهاية',inp('es_end',s.end,'type="time"')))+okc('حفظ',"CM.saveEditSess('"+m.sid+"')"));
+};
+CM.openEditSess=sid=>openM({type:'cm_editsess',sid});
+CM.saveEditSess=sid=>{
+  const s=byId(C().sessions,sid), d=val('es_date'), st=val('es_start'), en=val('es_end'), room=val('es_room');
+  if(!d||!st||!en||tm(en)<=tm(st)) return toast('تحقق من التاريخ والوقت','err');
+  const cf=conflicts(course(s.courseId),d,st,en,sid,room); if(cf.length) return toast(cf[0],'err');
+  if(tx(()=>{ C().logs.push({id:uid('lg'),sessionId:sid,action:'edit',fromDate:s.date,fromStart:s.start,toDate:d,toStart:st,reason:'تعديل يدوي',by:who(),at:nowISO()}); Object.assign(s,{date:d,start:st,end:en,room,hours:sHours(st,en)}); })) done('تم تعديل الحصة');
+};
+
+/* ---------------- المالية ---------------- */
+function vFinance(){
+  const cs=C().courses.map(c=>({c,k:cStats(c.id)})), sum=f=>r2(cs.reduce((a,x)=>a+x.k[f],0));
+  return '<div class="kpi-grid">'+kpi('المتوقع',money(sum('expected')))+kpi('المحصّل',money(sum('collected')))+kpi('المتبقي على الطلاب',money(sum('outstanding')))+kpi('مستحقات المعلمين',money(sum('earned')))+kpi('المدفوع للمعلمين',money(sum('tpaid')))+kpi('التزامات المعلمين',money(sum('liab')))+kpi('مصروفات أخرى',money(sum('exp')))+kpi('صافي الربح',money(sum('net')))+'</div>'
+  +'<div class="panel"><div class="panel-h"><h3>الملخص المالي لكل كورس</h3></div>'+tbl(['الكورس','المتوقع','المحصّل','المتبقي','مستحق المعلم','مدفوع للمعلم','التزام','مصروفات','صافي الربح'],cs.map(x=>[esc(x.c.name),money(x.k.expected),money(x.k.collected),money(x.k.outstanding),money(x.k.earned),money(x.k.tpaid),money(x.k.liab),money(x.k.exp),'<b>'+money(x.k.net)+'</b>']),['الإجمالي',money(sum('expected')),money(sum('collected')),money(sum('outstanding')),money(sum('earned')),money(sum('tpaid')),money(sum('liab')),money(sum('exp')),money(sum('net'))])+'</div>';
+}
+
+/* ---------------- التقارير والطباعة ---------------- */
+const RT=[['coursePerf','أداء كورس','c'],['students','قائمة تسجيل الطلاب','c'],['attendance','حضور الطلاب','c'],['teacherHours','ساعات عمل معلم','t'],['teacherStatement','كشف حساب معلم','t'],['courseFinance','إيرادات ومصروفات كورس','c'],['outstanding','المدفوعات المتأخرة للطلاب','co'],['overall','التقرير المالي الشامل','']];
+const inR=(d,f,t)=>!(f&&d<f)&&!(t&&d>t);
+function buildReport(r){
+  const c=C(), P=r.param, f=r.from, to=r.to, secs=[], meta=[];
+  const rng=(f||to)?'الفترة: '+(f?fD(f):'البداية')+' إلى '+(to?fD(to):'اليوم'):'كل الفترات';
+  const type=r.type, cr=P&&course(P), tc=P&&teacher(P);
+  let title=(RT.find(x=>x[0]===type)||[0,''])[1];
+  if(type==='coursePerf'||type==='students'||type==='attendance'||type==='courseFinance'){
+    if(!cr) return {title,meta:['اختر الكورس'],sections:[]};
+    title+=' — '+cr.name; const k=cStats(cr.id), en=enrollsOf(cr.id,true);
+    if(type==='coursePerf'){
+      const recs=c.att.filter(a=>en.some(e=>e.id===a.enrollId)), pr=recs.filter(a=>a.status==='present').length;
+      secs.push({title:'ملخص',head:['البند','القيمة'],rows:[['المعلم',(teacher(cr.teacherId)||{}).name||'—'],['المادة',cr.subject||'—'],['الحالة',CS[cr.status][0]],['الفترة',fD(cr.startDate)+' → '+fD(cr.endDate)],['عدد الطلاب',k.students],['الحصص المجدولة',k.scheduled],['المكتملة',k.completed],['المؤجلة',k.postponed],['الملغاة',k.cancelled],['ساعات التدريس المنفذة',k.hours],['متوسط الحضور',recs.length?Math.round(pr/recs.length*100)+'%':'—'],['الإيراد المتوقع',money(k.expected)],['المحصّل',money(k.collected)],['المتبقي على الطلاب',money(k.outstanding)],['مستحقات المعلم',money(k.earned)],['صافي الربح',money(k.net)]]});
+      secs.push({title:'الحصص',head:['التاريخ','الوقت','الساعات','القاعة','الحالة'],rows:c.sessions.filter(s=>s.courseId===cr.id).sort((a,b)=>a.date.localeCompare(b.date)).map(s=>[fD(s.date),s.start+' – '+s.end,s.hours,s.room||'—',SS[s.status][0]])});
+    } else if(type==='students'){
+      secs.push({title:'الطلاب المسجلون',head:['#','الاسم','الجوال','تاريخ التسجيل','الرسوم','المدفوع','المتبقي','الدفع','الحالة'],rows:en.map((e,i)=>[i+1,stName(e),stPhone(e),fD(e.regDate),money(e.fee),money(paidOfEn(e.id)),money(e.status==='active'?Math.max(0,e.fee-paidOfEn(e.id)):0),e.status==='active'?PS[enPay(e)][0]:'—',ENS[e.status]])});
+    } else if(type==='attendance'){
+      secs.push({title:'حضور الطلاب',head:['الطالب','حاضر','غائب','بعذر','عدد المسجل','النسبة'],rows:en.map(e=>{const a=attPct(e.id);return [stName(e),a.present,a.absent,a.excused,a.total,a.pct===null?'—':a.pct+'%'];})});
+    } else {
+      secs.push({title:'ملخص مالي',head:['البند','المبلغ'],rows:[['الإيراد المتوقع',money(k.expected)],['المحصّل فعلياً',money(k.collected)],['المتبقي على الطلاب',money(k.outstanding)],['مستحقات المعلم (مستحقة)',money(k.earned)],['المدفوع للمعلم',money(k.tpaid)],['التزامات المعلم المتبقية',money(k.liab)],['مصروفات أخرى',money(k.exp)],['صافي الربح (المحصّل − مدفوعات المعلم − المصروفات)',money(k.net)]]});
+      const ids=en.map(e=>e.id);
+      secs.push({title:'مدفوعات الطلاب',head:['التاريخ','الطالب','المبلغ','الطريقة'],rows:c.sPays.filter(p=>ids.indexOf(p.enrollId)>=0).sort((a,b)=>a.date.localeCompare(b.date)).map(p=>[fD(p.date),stName(byId(c.enrolls,p.enrollId)),money(p.amount),p.method||''])});
+      secs.push({title:'المصروفات',head:['التاريخ','البند','المبلغ'],rows:c.exps.filter(x=>x.courseId===cr.id).map(x=>[fD(x.date),x.title,money(x.amount)])});
+    }
+  } else if(type==='teacherHours'||type==='teacherStatement'){
+    if(!tc) return {title,meta:['اختر المعلم'],sections:[]};
+    title+=' — '+tc.name; meta.push('الجوال: '+tc.phone+' · التخصص: '+(tc.subject||'—')); meta.push(rng);
+    const ss=c.sessions.filter(s=>s.status==='completed'&&s.teacherId===tc.id&&inR(s.date,f,to)).sort((a,b)=>a.date.localeCompare(b.date));
+    const hrs=r2(ss.reduce((a,s)=>a+s.hours,0)), earned=r2(ss.reduce((a,s)=>a+sessEarn(s),0));
+    secs.push({title:'الحصص المكتملة',head:['التاريخ','الكورس','الوقت','الساعات','سعر الساعة','المستحق'],rows:ss.map(s=>[fD(s.date),(course(s.courseId)||{}).name||'',s.start+' – '+s.end,s.hours,money(s.rate),money(sessEarn(s))]),foot:['الإجمالي','','',hrs,'',money(earned)]});
+    if(type==='teacherStatement'){
+      const ps=c.tPays.filter(p=>p.teacherId===tc.id&&inR(p.date,f,to)).sort((a,b)=>a.date.localeCompare(b.date)), pt=r2(ps.reduce((a,p)=>a+p.amount,0)), k=tStats(tc.id);
+      secs.push({title:'المدفوعات',head:['التاريخ','المبلغ','الطريقة','ملاحظات'],rows:ps.map(p=>[fD(p.date),money(p.amount),p.method||'',p.notes||'']),foot:['الإجمالي',money(pt),'','']});
+      secs.push({title:'الخلاصة',head:['البند','المبلغ'],rows:[['مستحق الفترة',money(earned)],['مدفوع الفترة',money(pt)],['الرصيد المتبقي الكلي (كل الفترات)',money(k.bal)]]});
+    }
+  } else if(type==='outstanding'){
+    meta.push(cr?'الكورس: '+cr.name:'كل الكورسات');
+    const rows=c.enrolls.filter(e=>e.status==='active'&&e.fee-paidOfEn(e.id)>0&&(!cr||e.courseId===cr.id)).map(e=>[(course(e.courseId)||{}).name||'',stName(e),stPhone(e),e.fee,paidOfEn(e.id),r2(e.fee-paidOfEn(e.id))]);
+    secs.push({title:'الطلاب غير المسددين',head:['الكورس','الطالب','الجوال','الرسوم','المدفوع','المتبقي'],rows:rows.map(x=>[x[0],x[1],x[2],money(x[3]),money(x[4]),money(x[5])]),foot:['الإجمالي','','','','',money(rows.reduce((a,x)=>a+x[5],0))]});
+  } else {
+    const cs=c.courses.map(x=>({x,k:cStats(x.id)})), sm=k=>money(cs.reduce((a,y)=>a+y.k[k],0));
+    secs.push({title:'الكورسات',head:['الكورس','المتوقع','المحصّل','المتبقي','مستحق المعلم','مدفوع للمعلم','مصروفات','صافي الربح'],rows:cs.map(y=>[y.x.name,money(y.k.expected),money(y.k.collected),money(y.k.outstanding),money(y.k.earned),money(y.k.tpaid),money(y.k.exp),money(y.k.net)]),foot:['الإجمالي',sm('expected'),sm('collected'),sm('outstanding'),sm('earned'),sm('tpaid'),sm('exp'),sm('net')]});
+    secs.push({title:'المعلمون',head:['المعلم','الساعات','المستحق','المدفوع','المتبقي'],rows:c.teachers.map(t=>{const k=tStats(t.id);return [t.name,k.hours,money(k.earned),money(k.paid),money(k.bal)];})});
+  }
+  return {title,meta,sections:secs};
+}
+function repHTML(rep){
+  return (rep.meta||[]).map(m=>'<div class="meta" style="font-size:12.5px;color:#888;margin-bottom:4px;">'+esc(m)+'</div>').join('')
+   +rep.sections.map(s=>'<h2 style="font-size:15px;margin:16px 0 6px;">'+esc(s.title)+'</h2>'+tbl(s.head.map(esc),s.rows.map(r=>r.map(x=>esc(x))),s.foot?s.foot.map(esc):null)).join('');
+}
+function printReport(rep){
+  const f=document.createElement('iframe'); f.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden;'; document.body.appendChild(f);
+  const d=f.contentWindow.document; d.open();
+  d.write('<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>'+esc(rep.title)+'</title><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600&display=swap" rel="stylesheet"><style>body{font-family:"IBM Plex Sans Arabic",Tahoma,Arial,sans-serif;color:#111;padding:24px;direction:rtl}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:16px 0 6px}.meta{color:#555;font-size:12px;margin-bottom:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #bbb;padding:6px 8px;text-align:right;white-space:normal}th{background:#eee}tfoot td{font-weight:700;background:#f6f6f6}.scrollx{overflow:visible}</style></head><body><div style="color:#777;font-size:12px;">'+esc(DB.settings.name)+' · '+fD(today())+'</div><h1>'+esc(rep.title)+'</h1>'+repHTML(rep).replace(/color:#888/g,'color:#555')+'</body></html>');
+  d.close(); setTimeout(()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ toast('تعذر فتح الطباعة','err'); } setTimeout(()=>f.remove(),60000); },400);
+}
+function vReports(){
+  const r=S().rep;
+  return '<div class="panel"><div class="toolbar">'+sel('rp_type',RT.map(x=>[x[0],x[1]]),r.type,'onchange="CM.repChange(true)" style="width:auto;min-width:200px;padding:8px;"').replace('style="'+ST+'"','')
+   +'<span id="rp_par"></span><input type="date" class="input-dark" id="rp_from" value="'+(r.from||'')+'" onchange="CM.repChange()" title="من"><input type="date" class="input-dark" id="rp_to" value="'+(r.to||'')+'" onchange="CM.repChange()" title="إلى">'
+   +'<div style="display:flex;gap:6px;margin-right:auto;"><button class="btn btn-brass btn-sm" onclick="CM.repPrint()">🖨 طباعة / PDF</button><button class="btn btn-ghost-dark btn-sm" onclick="CM.repCSV()">⬇ CSV</button></div></div>'
+   +'<div id="rp_out"></div></div>';
+}
+function repParam(){
+  const r=S().rep, def=RT.find(x=>x[0]===r.type)[2];
+  if(!def) return '';
+  const opts=def==='t'?tOpts():cOpts(def==='co'?'كل الكورسات':'');
+  return sel('rp_param',opts,r.param,'onchange="CM.repChange()" style="width:auto;min-width:180px;padding:8px;"').replace('style="'+ST+'"','');
+}
+CM.repChange=(typeChanged,init)=>{
+  const r=S().rep;
+  if(!init){ if(typeChanged) { r.type=val('rp_type'); r.param=''; } else if($('rp_param')) r.param=val('rp_param'); r.from=val('rp_from'); r.to=val('rp_to'); }
+  if(typeChanged||init){ $('rp_par').innerHTML=repParam(); const p=$('rp_param'); if(p) p.value=r.param; }
+  $('rp_out').innerHTML=repHTML(buildReport(r));
+};
+CM.repPrint=()=>printReport(buildReport(S().rep));
+CM.repCSV=()=>{
+  const rep=buildReport(S().rep), q=x=>'"'+String(x==null?'':x).replace(/[\u2066\u2069]/g,'').replace(/"/g,'""')+'"';
+  let out='\uFEFF'+q(rep.title)+'\n';
+  rep.sections.forEach(s=>{ out+='\n'+q(s.title)+'\n'+s.head.map(q).join(',')+'\n'+s.rows.map(r=>r.map(q).join(',')).join('\n')+'\n'; });
+  const url=URL.createObjectURL(new Blob([out],{type:'text/csv;charset=utf-8;'})), a=document.createElement('a'); a.href=url; a.download='تقرير-كورسات-'+today()+'.csv'; a.click(); URL.revokeObjectURL(url);
+};
+})();
+</script>
 </body>
 </html>
