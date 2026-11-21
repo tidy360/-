@@ -3275,5 +3275,146 @@ CM.repCSV=()=>{
 };
 })();
 </script>
+  <script>
+/* ===== تعديلات: إخفاء المبالغ + إصلاح صافي الربح + إضافة/حذف طالب ===== */
+(function(){
+const p2=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const $=id=>document.getElementById(id);
+const val=id=>{const e=$(id);return e?String(e.value).trim():'';};
+const ST='width:100%;padding:10px;border-radius:8px;', LB='color:#B7BAC4;';
+
+/* ============ 1) إخفاء / إظهار المبالغ (نجوم) ============ */
+const HK='ahlam_hide_money';
+let HIDE=false; try{ HIDE=localStorage.getItem(HK)==='1'; }catch(e){}
+const _kpi=kpi;
+kpi=function(label,v){
+  if(HIDE && typeof v==='string' && DB && DB.settings && v.indexOf(DB.settings.currency)>=0) v='*****';
+  return _kpi(label,v);
+};
+App.toggleMoney=()=>{ HIDE=!HIDE; try{ localStorage.setItem(HK,HIDE?'1':'0'); }catch(e){} render(); };
+const _ra=renderAdmin;
+renderAdmin=function(){
+  const h=_ra();
+  const btn='<button class="btn btn-ghost-dark btn-sm" onclick="App.toggleMoney()">'+(HIDE?'👁 إظهار المبالغ':'🙈 إخفاء المبالغ')+'</button>';
+  return h.replace('<span class="badge badge-green">',()=>btn+'<span class="badge badge-green">');
+};
+
+/* ============ 2) لوحة الرئيسية: فصل الإيرادات وإصلاح صافي الربح ============ */
+pgDashboard=function(){
+  const now=new Date();
+  const visitsToday=DB.checkins.filter(c=>isSameDay(c.entryAt,todayISO())).length;
+  const weekRange=periodRange('week'), monthRange=periodRange('month');
+  const visitsWeek=DB.checkins.filter(c=>inRange(c.entryAt,weekRange)).length;
+  const visitsMonth=DB.checkins.filter(c=>inRange(c.entryAt,monthRange)).length;
+  const bookingsToday=DB.bookings.filter(b=>b.date===todayISO()).length;
+  const upcoming=DB.bookings.filter(b=>b.date>todayISO()&&b.status!=='Cancelled').length;
+  const revToday=revenueInRange({from:new Date(new Date().setHours(0,0,0,0)),to:now});
+  const revWeek=revenueInRange(weekRange);
+  const revMonthAll=revenueInRange(monthRange);                       // الحجوزات + الاشتراكات + المنتجات
+  const productMonth=DB.orders.filter(o=>inRange(o.createdAt,monthRange)).reduce((s,o)=>s+o.total,0);
+  const revMonth=revMonthAll-productMonth;                            // الحجوزات والاشتراكات فقط
+  const monthKey=now.getFullYear()+'-'+p2(now.getMonth()+1);
+  const monthExpenses=(DB.expenses||[]).filter(e=>String(e.date||'').slice(0,7)===monthKey).reduce((s,e)=>s+Number(e.amount||0),0);
+  const netProfit=revMonth+productMonth-monthExpenses;                // بدون أي تكرار
+  const usageHours=DB.checkins.filter(c=>c.status==='completed').reduce((s,c)=>s+(c.actualHours||0),0);
+  const occRate=DB.seats.length?Math.round((currentlyInside().length/DB.seats.length)*100):0;
+  const topProducts=[...DB.products].sort((a,b)=>b.sold-a.sold).slice(0,5);
+  return `
+  <div class="kpi-grid">
+    ${kpi('زوار اليوم',visitsToday)}
+    ${kpi('زوار هذا الأسبوع',visitsWeek)}
+    ${kpi('زوار هذا الشهر',visitsMonth)}
+    ${kpi('الموجودون حالياً',currentlyInside().length)}
+    ${kpi('حجوزات اليوم',bookingsToday)}
+    ${kpi('حجوزات قادمة',upcoming)}
+    ${kpi('إيرادات اليوم',fmtMoney(revToday))}
+    ${kpi('إيرادات الأسبوع',fmtMoney(revWeek))}
+    ${kpi('إيرادات الشهر (حجوزات واشتراكات)',fmtMoney(revMonth))}
+    ${kpi('مبيعات المنتجات (الشهر)',fmtMoney(productMonth))}
+    ${kpi('المصروفات (الشهر)',fmtMoney(monthExpenses))}
+    ${kpi('صافي ربح الشهر',fmtMoney(netProfit))}
+    ${kpi('ساعات الاستخدام',Math.round(usageHours))}
+    ${kpi('نسبة إشغال المقاعد',occRate+'%')}
+  </div>
+  <div class="panel" style="font-size:12.5px;color:var(--ink-soft);">صافي ربح الشهر = إيرادات الشهر (حجوزات واشتراكات) + مبيعات منتجات الشهر − مصروفات الشهر. إيرادات اليوم والأسبوع تشمل مبيعات المنتجات.</div>
+  <div class="grid2">
+    <div class="panel"><div class="panel-h"><h3>الإيرادات آخر 7 أيام</h3></div><canvas id="chartRevenue" height="180"></canvas></div>
+    <div class="panel"><div class="panel-h"><h3>المنتجات الأكثر مبيعاً</h3></div>
+      ${topProducts.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);"><span>${p.emoji} ${esc(p.name)}</span><span class="badge badge-amber num">${p.sold} مباع</span></div>`).join('')||'<div class="empty">لا توجد مبيعات بعد</div>'}
+    </div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>أحدث الحجوزات</h3><div style="display:flex;gap:8px;"><button class="btn btn-brass btn-sm" onclick="App.openNewBooking()">+ حجز جديد</button><a class="btn btn-ghost-dark btn-sm" onclick="App.goAdminPage('bookings')">عرض الكل</a></div></div>
+    ${bookingTable(DB.bookings.slice(-6).reverse())}
+  </div>`;
+};
+
+/* ============ 3) إضافة وحذف طالب (تبويب الطلاب في الكورسات) ============ */
+const CMX=window.CMX={};
+function decorate(html){
+  return html
+    .replace(/(<button class="btn btn-ghost-dark btn-sm" onclick="CM\.openStudent\('([^']+)'\)">تفاصيل<\/button>)/g,
+      (m,btn,id)=>btn+' <button class="btn btn-danger btn-sm" onclick="CMX.askDelStudent(\''+id+'\')">حذف</button>');
+}
+const _rap=renderAdminPage;
+renderAdminPage=function(staff){
+  const h=_rap(staff);
+  if(UI.adminPage==='courses'&&UI.cm&&UI.cm.tab==='students'&&!UI.cm.cid){
+    return decorate(h).replace('oninput="CM.sSearch(this.value)"></div>',
+      ()=>'oninput="CM.sSearch(this.value)"><button class="btn btn-brass btn-sm" style="margin-right:auto;" onclick="CMX.openAddStudent()">+ إضافة طالب</button></div>');
+  }
+  return h;
+};
+if(window.CM&&CM.sSearch){
+  const _ss=CM.sSearch;
+  CM.sSearch=v=>{ _ss(v); const e=$('cm_slist'); if(e) e.innerHTML=decorate(e.innerHTML); };
+}
+
+CMX.openAddStudent=()=>{ UI.modal={type:'cmx_addstu'}; render(); };
+CMX.asFee=()=>{ const c=(DB.cm.courses||[]).find(x=>x.id===val('as_course')); $('as_fee').value=c?c.price:''; };
+function addStuModal(){
+  const cs=(DB.cm.courses||[]).filter(c=>!c.archived&&c.status!=='cancelled');
+  const f=(l,h)=>'<div class="form-row"><label style="'+LB+'">'+l+'</label>'+h+'</div>';
+  const i=(id,x)=>'<input class="input-dark" style="'+ST+'" id="'+id+'" '+(x||'')+'>';
+  return '<div class="modal-bg"><div class="modal"><h3>إضافة طالب</h3>'
+   +f('اسم الطالب',i('as_name'))+f('رقم الجوال',i('as_phone','type="tel"'))
+   +f('تسجيله في كورس (اختياري)','<select class="input-dark" style="'+ST+'" id="as_course" onchange="CMX.asFee()"><option value="">بدون تسجيل في كورس الآن</option>'+cs.map(c=>'<option value="'+c.id+'">'+esc(c.name)+' — '+c.price+' '+DB.settings.currency+'</option>').join('')+'</select>')
+   +f('الرسوم (إذا اختير كورس)',i('as_fee','type="number" min="0"'))
+   +'<div style="display:flex;gap:10px;margin-top:10px;"><button class="btn btn-brass" style="flex:1;justify-content:center;" onclick="CMX.saveStudent()">حفظ</button><button class="btn btn-ghost-dark" onclick="App.closeModal()">إلغاء</button></div></div></div>';
+}
+CMX.saveStudent=()=>{
+  const name=val('as_name'), phone=val('as_phone').replace(/\s+/g,''), cid=val('as_course'), fee=parseFloat(val('as_fee'))||0;
+  if(!name) return toast('اكتب اسم الطالب','err');
+  if(phone.replace(/\D/g,'').length<7) return toast('أدخل رقم جوال صحيح','err');
+  const c=DB.cm, ex=c.students.find(s=>s.phone===phone);
+  if(ex) return toast('هذا الرقم مسجل باسم «'+ex.name+'» — استخدم زر "تسجيل في كورس" بجانبه','err');
+  if(cid&&!c.courses.find(x=>x.id===cid)) return toast('الكورس غير موجود','err');
+  if(fee<0) return toast('الرسوم غير صحيحة','err');
+  const st={id:uid('stu'),name,phone,createdAt:new Date().toISOString()};
+  c.students.push(st);
+  if(cid) c.enrolls.push({id:uid('en'),courseId:cid,studentId:st.id,fee,regDate:ymd(new Date()),status:'active',createdAt:new Date().toISOString(),by:(currentStaff()||{}).name||''});
+  UI.modal=null; toast('تمت إضافة الطالب'); save();
+};
+CMX.askDelStudent=id=>{
+  const s=DB.cm.students.find(x=>x.id===id); if(!s) return;
+  UI.modal={type:'confirm',title:'حذف طالب',text:'سيتم حذف «'+s.name+'» نهائياً مع تسجيلاته وسجل حضوره. لا يمكن الحذف إذا كانت له مدفوعات مسجلة.',confirmLabel:'حذف',onConfirm:"()=>{CMX.delStudent('"+id+"')}"};
+  render();
+};
+CMX.delStudent=id=>{
+  const c=DB.cm, en=c.enrolls.filter(e=>e.studentId===id).map(e=>e.id);
+  if(c.sPays.some(p=>en.indexOf(p.enrollId)>=0)) return toast('للطالب مدفوعات مسجلة — احذف دفعاته أولاً (من مالية الكورس) أو أزله من الكورس بدل الحذف','err');
+  c.att=c.att.filter(a=>en.indexOf(a.enrollId)<0);
+  c.enrolls=c.enrolls.filter(e=>e.studentId!==id);
+  c.students=c.students.filter(s=>s.id!==id);
+  toast('تم حذف الطالب'); save();
+};
+
+const _rm=renderModal;
+renderModal=function(){
+  if(UI.modal&&UI.modal.type==='cmx_addstu'){ const h=document.createElement('div'); document.body.appendChild(h); h.outerHTML=addStuModal(); return; }
+  _rm();
+};
+})();
+</script>
 </body>
 </html>
